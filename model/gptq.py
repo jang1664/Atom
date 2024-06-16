@@ -25,6 +25,9 @@ torch.backends.cudnn.allow_tf32 = False
 # maxq: mapped data width
 # channel_group: number of channel group quantized together
 def quantize_gptq(x, scale, zero, maxq, channel_group, quant_type="int"):
+    """
+    quantize for a block, one output channel
+    """
     if maxq < 0:
         return (x > scale / 2).float() * scale + (x < zero / 2).float() * zero
     shape = x.shape
@@ -98,15 +101,18 @@ class Quantizer_GPTQ(nn.Module):
             self.maxq = torch.tensor(-1) 
 
     def find_params(self, x, weight=False):
+        """
+        x: (output_channel_num, group_size) or (output_channel_num, non_outlier_in_channel_num)
+        """
         dev = x.device
-        self.maxq = self.maxq.to(dev)
+        self.maxq = self.maxq.to(dev) #- 15 for 4bit weight
 
         shape = x.shape
-        if self.perchannel:
+        if self.perchannel: #- perchannel for a group
             if weight:
                 x = x.flatten(1)
                 if self.channel_group > 1:
-                    x = x.reshape(int(shape[0]/self.channel_group), -1)
+                    x = x.reshape(int(shape[0]/self.channel_group), -1) #- concat channel_group output channels
             else:
                 if len(shape) == 4:
                     x = x.permute([1, 0, 2, 3])
@@ -119,16 +125,16 @@ class Quantizer_GPTQ(nn.Module):
             x = x.flatten().unsqueeze(0)
 
         tmp = torch.zeros(x.shape[0], device=dev)
-        xmin = torch.minimum(x.min(1)[0], tmp)
-        xmax = torch.maximum(x.max(1)[0], tmp)
+        xmin = torch.minimum(x.min(1)[0], tmp) #- min(0, min(x)) for a output channel
+        xmax = torch.maximum(x.max(1)[0], tmp) #- max(0, max(x)) for a output channel
 
         if self.sym:
-            xmax = torch.maximum(torch.abs(xmin), xmax)
+            xmax = torch.maximum(torch.abs(xmin), xmax) #- max of abs for a output channel
             tmp = xmin < 0
             if torch.any(tmp):
-                xmin[tmp] = -xmax[tmp]
+                xmin[tmp] = -xmax[tmp] #- symmetric range across zero
 
-        tmp = (xmin == 0) & (xmax == 0)
+        tmp = (xmin == 0) & (xmax == 0) #- all zero output channel
         xmin[tmp] = -1
         xmax[tmp] = +1
 
@@ -139,7 +145,7 @@ class Quantizer_GPTQ(nn.Module):
             # shrink the range based on clip ratio
             self.scale = (xmax - xmin) * self.clip_ratio / self.maxq
             if self.sym:
-                self.zero = torch.full_like(self.scale, (self.maxq + 1) / 2)
+                self.zero = torch.full_like(self.scale, (self.maxq + 1) / 2) #- shift quantized idx to positive region
             else:
                 self.zero = torch.round(-xmin / self.scale)
 
@@ -171,7 +177,7 @@ class Quantizer_GPTQ(nn.Module):
 
         if weight:
             shape = [-1] + [1] * (len(shape) - 1)
-            self.scale = self.scale.reshape(shape)
+            self.scale = self.scale.reshape(shape) #- make 2D. value for a output channel
             self.zero = self.zero.reshape(shape)
             return
         if len(shape) == 4:
@@ -197,6 +203,10 @@ class Quantizer_GPTQ(nn.Module):
 
 class GPTQ:
     def __init__(self, layer, n_out, keeper_precision=0):
+        """
+        layer: Linear layer
+        n_out: outlier number
+        """
         self.layer = layer
         self.dev = self.layer.weight.device
         W = layer.weight.data.clone()
@@ -206,9 +216,9 @@ class GPTQ:
         if isinstance(self.layer, transformers.Conv1D):
             W = W.t()
         
-        self.rows = W.shape[0]
-        self.columns = W.shape[1] 
-        self.H = torch.zeros((self.columns, self.columns), device=self.dev) 
+        self.rows = W.shape[0] #- output channel
+        self.columns = W.shape[1]  #- input channel
+        self.H = torch.zeros((self.columns, self.columns), device=self.dev) #- (hidden_dim, hidden_dim)
         self.nsamples = 0 
         self.keeper_precision = keeper_precision
 
@@ -219,11 +229,11 @@ class GPTQ:
     def add_batch(self, inp, out):
         if len(inp.shape) == 2:
             inp = inp.unsqueeze(0)
-        tmp = inp.shape[0] 
+        tmp = inp.shape[0] #- batch size
         if isinstance(self.layer, nn.Linear) or isinstance(self.layer, transformers.Conv1D) or isinstance(self.layer, QLinearLayer):
             if len(inp.shape) == 3:
-                inp = inp.reshape((-1, inp.shape[-1]))
-            inp = inp.t() 
+                inp = inp.reshape((-1, inp.shape[-1])) #- (batch*seq, hidden_dim)
+            inp = inp.t()
         if isinstance(self.layer, nn.Conv2d):
             unfold = nn.Unfold(
                 self.layer.kernel_size,
@@ -235,10 +245,10 @@ class GPTQ:
             inp = inp.permute([1, 0, 2])
             inp = inp.flatten(1)
         
-        self.H *= self.nsamples / (self.nsamples + tmp)
+        self.H *= self.nsamples / (self.nsamples + tmp) #- adjust hessian of previous batch
         self.nsamples += tmp
-        inp = math.sqrt(2 / self.nsamples) * inp.float()
-        self.H += inp.matmul(inp.t())
+        inp = math.sqrt(2 / self.nsamples) * inp.float() #- 2X*XT/N
+        self.H += inp.matmul(inp.t()) #- average of hessian of all batch
     
     def fasterquant(
         self, blocksize=128, percdamp=.01, groupsize=-1, actorder=False
@@ -252,7 +262,7 @@ class GPTQ:
         W = W.float()
                 
         if not self.quantizer.ready():
-            self.quantizer.find_params(W[:,:self.n_nonout], weight=True)
+            self.quantizer.find_params(W[:,:self.n_nonout], weight=True) #- find param for non-outliers. for real perchannel quantize
 
         H = self.H.clone()
         del self.H
@@ -274,26 +284,26 @@ class GPTQ:
         Hinv = H
         
         for i1 in range(0, self.n_nonout, blocksize):
-            i2 = min(i1 + blocksize, self.n_nonout)
+            i2 = min(i1 + blocksize, self.n_nonout) #- next blocks. block can be greater than group_size
             count = i2 - i1
 
-            W1 = W[:, i1:i2].clone()
+            W1 = W[:, i1:i2].clone() #- a block of weight (output_channels, blocksize)
             Q1 = torch.zeros_like(W1)
             Err1 = torch.zeros_like(W1)
             Losses1 = torch.zeros_like(W1)
             Hinv1 = Hinv[i1:i2, i1:i2]
 
             for i in range(count):
-                w = W1[:, i]
+                w = W1[:, i] #- one input channel
                 d = Hinv1[i, i]
 
                 if groupsize > 0:
-                    if (i1 + i) % groupsize == 0:
-                        self.quantizer.find_params(W[:, (i1 + i):min((i1 + i + groupsize), self.n_nonout)], weight=True)
+                    if (i1 + i) % groupsize == 0: #- block can be greater than group_size. for group wise quantize
+                        self.quantizer.find_params(W[:, (i1 + i):min((i1 + i + groupsize), self.n_nonout)], weight=True) #- find param for group
                 q = quantize_gptq(
                     w.unsqueeze(1), self.quantizer.scale, self.quantizer.zero,
                     self.quantizer.maxq, self.quantizer.channel_group, self.quantizer.quant_type
-                ).flatten()
+                ).flatten() #- quantized value for a output channel
                 Q1[:, i] = q
                 Losses1[:, i] = (w - q) ** 2 / d ** 2
 
@@ -319,7 +329,7 @@ class GPTQ:
                 elif self.keeper_precision == 2:
                     keep_w = fake_quantize_quarter_E4M3(keep_w)
                 elif self.keeper_precision == 3:
-                    keep_w = quantize_tensor(keep_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
+                    keep_w = quantize_tensor(keep_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False) #- 8bit quantization for outlier. no channel group
 
             Q[:,self.n_nonout:] = keep_w
 

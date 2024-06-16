@@ -103,7 +103,7 @@ if __name__ == '__main__':
         '--weight_group_size', type=int, default=0, choices=[0, 32, 64, 128, 256, 384, 768],
         help='Group size when quantizing weights. Using 128 as default quantization group.'
     )
-    parser.add_argument(
+    parser.add_argument( #- ??
         '--weight_channel_group', type=int, default=1,
         help='Group size of channels that will quantize together. (only for weights now)'
     )
@@ -187,17 +187,22 @@ if __name__ == '__main__':
         '--quant_type', type=str, default='int', choices=['int', 'fp'],
         help='Determine the mapped data format by quant_type + n_bits. e.g. int8, fp4.'
     )
+    parser.add_argument(
+        '--save_model', action="store_true", default=True,
+        help='Whether to save the quantized model.'
+    )
     
     args = parser.parse_args()
 
     model_name = args.model.lower().split('/')[-1]
     assert model_name != None, "Please check the model path."
 
+    #- get models
     if "llama" in args.model.lower():
-        model = get_llama(args.model)
-        get_act_stats_func = get_act_stats_llama
-        reorder_model_func = reorder_model_llama
-        add_act_quant_wrapper_func = add_act_quant_wrapper_llama
+        model = get_llama(args.model) #- get model from checkpoint
+        get_act_stats_func = get_act_stats_llama #- get linear layer's input and output column-wises L2 norm
+        reorder_model_func = reorder_model_llama #- reorder weight and register buffer for act reorder index
+        add_act_quant_wrapper_func = add_act_quant_wrapper_llama #- configure activation quantization and attach
         quantize_model_gptq_func = quantize_model_gptq_llama
         quantize_model_func = quantize_model_llama
         eval_func = llama_eval
@@ -221,6 +226,7 @@ if __name__ == '__main__':
 
     import os
 
+    #- reorder based on activation for all linear layers
     if args.reorder:
         if args.cache_index == False:
             dataloader, testloader = get_loaders(
@@ -232,7 +238,7 @@ if __name__ == '__main__':
             )
 
             print("Getting reording index...")
-            reorder_index = get_reorder_index(model, act_scales)
+            reorder_index = get_reorder_index(model, act_scales) #- get linear layer's input, output reorder index
 
             if not os.path.exists(args.save_dir):
                 os.makedirs(args.save_dir)
@@ -245,14 +251,14 @@ if __name__ == '__main__':
             reorder_index = torch.load(index_filename)
 
         print("Reordering model...")
-        model = reorder_model_func(
+        model = reorder_model_func( #- reorder weight and register buffer for act reorder index
             model, device=DEV, args=args, reorder_index=reorder_index
         )
     
     if args.abits < 16:
         print("Inserting activations quantizers ...")
         scales = defaultdict(lambda: None)
-        model = add_act_quant_wrapper_func(model, device=DEV, args=args, scales=scales)
+        model = add_act_quant_wrapper_func(model, device=DEV, args=args, scales=scales) #- activation is dynamic quantization
 
     if args.wbits < 16:
         print("Quantizing...")
@@ -260,22 +266,52 @@ if __name__ == '__main__':
             dataloader, testloader = get_loaders(
                 args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen
             )
-            model = quantize_model_gptq_func(model, device=DEV, args=args, dataloader=dataloader)
+            model = quantize_model_gptq_func(model, device=DEV, args=args, dataloader=dataloader) #- weight is GPTQ quantization
         else:
             model = quantize_model_func(model, device=DEV, args=args)
 
+    if args.save_model:
+        print("Saving model...")
+        torch.save(model.cpu(), f'{args.save_dir}/{model_name}_quantized.pth')
 
     if args.eval_ppl:
-        datasets = ['wikitext2', 'ptb', 'c4']
+        # datasets = ['wikitext2', 'ptb', 'c4']
+        datasets = ['wikitext2']
+
+        #- register hook to get tensors
+        def get_tensors_hook(m, x, y, name, dataset):
+            if isinstance(x, tuple):
+                x = x[0]
+            torch.save(x, f'{args.save_dir}/{model_name}_{name}_input_{dataset}.pt')
+            if isinstance(y, tuple):
+                y = y[0]
+            torch.save(y, f'{args.save_dir}/{model_name}_{name}_output_{dataset}.pt')
+
+            torch.save(m.weight, f'{args.save_dir}/{model_name}_{name}_weight_{dataset}.pt')
+            if m.bias is not None:
+              torch.save(m.bias, f'{args.save_dir}/{model_name}_{name}_bias_{dataset}.pt')
+
 
         for dataset in datasets:
             dataloader, testloader = get_loaders(
                 dataset, seed=args.seed, model=args.model, seqlen=model.seqlen
             )
+
+            # hooks = []
+            # for name, m in model.model.named_modules():
+            #     if isinstance(m, QLinearLayer):
+            #         hooks.append(
+            #             m.register_forward_hook(
+            #                 functools.partial(get_tensors_hook, name=name, dataset=dataset))
+            #         )
+
             print(f"Evaluating {dataset} ...")
             ppl = eval_func(model, testloader, DEV)
 
             print(f"targetResult,{dataset},{ppl:.3f}")
+
+            # for hook in hooks:
+            #     hook.remove()
     
     # eval zero shot accuracy on commonsense datasets
     if args.eval_common_sense:

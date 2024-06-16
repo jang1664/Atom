@@ -179,6 +179,7 @@ def quantize_tensor(w: torch.tensor, n_bits, group_size, tiling, sym, clip_ratio
                 scales = (w_max-w_min).clamp(min=1e-5) / q_max
                 base = torch.round(-w_min/scales).clamp_(min=q_min, max=q_max)
             w = (torch.clamp(torch.round(w / scales) + base, q_min, q_max) - base) * scales
+            #- scales, base, q_min, q_max should be saved
     
     return w.reshape(savedShape)
 
@@ -186,6 +187,9 @@ def quantize_tensor(w: torch.tensor, n_bits, group_size, tiling, sym, clip_ratio
 # Simulate mixed-precision by decomposing input
 @torch.no_grad()
 def quantize_activation_wrapper(x: torch.tensor, args) -> torch.tensor:
+    """
+    x: reordered input tensor
+    """
     if args.abits >= 16:
         return x 
     
@@ -206,7 +210,7 @@ def quantize_activation_wrapper(x: torch.tensor, args) -> torch.tensor:
     assert args.act_group_size == 0 or (savedShape[-1]) % args.act_group_size == 0, "Group size should be divisible by (dim - keeper)."
 
     if args.keeper > 0:
-        saved_x = x[:, -args.keeper:].clone().contiguous()
+        saved_x = x[:, -args.keeper:].clone().contiguous() #- outlier portion
     
     # Mixed-precision for outliers
     # FP8/INT8/FP16
@@ -217,7 +221,7 @@ def quantize_activation_wrapper(x: torch.tensor, args) -> torch.tensor:
         elif args.keeper_precision == 2:
             saved_x = fake_quantize_quarter_E4M3(saved_x)
         elif args.keeper_precision == 3:
-            saved_x = quantize_tensor(saved_x, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
+            saved_x = quantize_tensor(saved_x, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False) #- channel wise 8bit sym, uniform quantization
     # Set zero to avoid interference
     if args.keeper > 0:
         x[:, -args.keeper:] = 0
@@ -296,7 +300,7 @@ class Quantizer(nn.Module):
         return self
 
     def configure(self, func, scales):
-        if self.args.static == False:
+        if self.args.static == False: #- dynamic for act, static for weight
             self.act_quant = func
             return
         assert scales is not None, "Scales is None"

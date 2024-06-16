@@ -1,0 +1,4 @@
+model,bit,piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
+/root/.cache/huggingface/hub/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9,4,,,,,,
+model,bit,piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
+/root/.cache/huggingface/hub/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9,4,,,,,,

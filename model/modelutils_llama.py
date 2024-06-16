@@ -12,7 +12,12 @@ from functools import partial
 
 from quant import quantize_activation_wrapper, quantize_attn_v_wrapper, quantize_attn_k_wrapper
 
+from copy import deepcopy
+
 def reorder_model_llama(model, device, args, reorder_index):
+    """
+    Reorder the model according to the reorder index.
+    """
     model.config.use_cache = False
     layers = model.model.layers
     assert reorder_index is not None, "Reorder index is None"
@@ -23,13 +28,14 @@ def reorder_model_llama(model, device, args, reorder_index):
         if isinstance(layers[i], LlamaDecoderLayer):
             m = QLlamaDecoderLayer(
                 originalLayer=layers[i],
-                args=args,
+                args=args, #- command line args
             )
         elif isinstance(layers[i], QLlamaDecoderLayer):
             m = layers[i]
         
         nameTemplate = 'layers.{}.{}.{}.{}' # Something like layers.10.self_attn.q_proj
 
+        #- reorder the weights for MLP
         m.mlp.gate_proj.reorder(
             in_reorder_index=reorder_index[nameTemplate.format(i, 'mlp', 'gate_proj', 'input')],
             out_reorder_index=reorder_index[nameTemplate.format(i, 'mlp', 'down_proj', 'input')]
@@ -45,7 +51,7 @@ def reorder_model_llama(model, device, args, reorder_index):
         # K has outlier should be kept.
         # Not reorder due to the RoPE embedding.
         m.self_attn.q_proj.reorder(
-            in_reorder_index=reorder_index[nameTemplate.format(i, 'self_attn', 'q_proj', 'input')],
+            in_reorder_index=reorder_index[nameTemplate.format(i, 'self_attn', 'q_proj', 'input')], #- q_proj, k_proj, v_proj index will be same
             out_reorder_index=None
         )
         m.self_attn.k_proj.reorder(
@@ -60,7 +66,7 @@ def reorder_model_llama(model, device, args, reorder_index):
             in_reorder_index=reorder_index[nameTemplate.format(i, 'self_attn', 'o_proj', 'input')],
             out_reorder_index=None
         )
-        m.input_layernorm.register_buffer('reorder_index', 
+        m.input_layernorm.register_buffer('reorder_index', #- for later fusion of input reordering
             reorder_index[nameTemplate.format(i, 'self_attn', 'k_proj', 'input')] # Random choose one from k,q,v proj.
         )
         m.post_attention_layernorm.register_buffer('reorder_index',
@@ -69,12 +75,15 @@ def reorder_model_llama(model, device, args, reorder_index):
         m.self_attn.register_buffer('reorder_index', reorder_index[nameTemplate.format(i, 'self_attn', 'o_proj', 'input')])
 
         layers[i] = layers[i].cpu()
-        layers[i] = m.cpu()
+        layers[i] = m.cpu() #- replace llama decoder layer
         del m
         torch.cuda.empty_cache()
     return model
 
 def add_act_quant_wrapper_llama(model, device, args, scales):
+    """
+    replace LlamaDecoderLayer with QLlamaDecoderLayer and add quantization wrapper to the model.
+    """
     model.config.use_cache = False
     layers = model.model.layers
     for i in tqdm(range(len(layers))):
@@ -93,7 +102,7 @@ def add_act_quant_wrapper_llama(model, device, args, scales):
         m = m.to(device)
 
         nameTemplate = 'layers.{}.{}.{}'
-        m.self_attn.act_quant.configure(
+        m.self_attn.act_quant.configure( #- attach dynamic quant wrapper. for attention output
             partial(quantize_activation_wrapper, args=args),
             scales[nameTemplate.format(i, 'self_attn', 'o_proj')]
         )
@@ -217,17 +226,17 @@ def quantize_model_gptq_llama(model, device, args, dataloader):
 
         layer = m.to(device)
 
-        block_layers = find_qlinear_layers(layer)
+        block_layers = find_qlinear_layers(layer) #- find Qlinear layer and return a dict
 
         sequential = [list(block_layers.keys())]
        
         for names in sequential:
-            subset = {n: block_layers[n] for n in names}
+            subset = {n: block_layers[n] for n in names} #- same with block_layers
 
             gptq = {}
             for name in subset:
                 gptq[name] = GPTQ(
-                    subset[name], n_out=args.keeper, keeper_precision=args.keeper_precision
+                    subset[name], n_out=args.keeper, keeper_precision=args.keeper_precision #- args: 128, 3
                 )
                 gptq[name].quantizer = Quantizer_GPTQ()
                 gptq[name].quantizer.configure(
@@ -235,7 +244,7 @@ def quantize_model_gptq_llama(model, device, args, dataloader):
                     channel_group=args.weight_channel_group,
                     clip_ratio=args.w_clip_ratio,
                     quant_type=args.quant_type
-                )
+                ) #- 4, true, 2, 0.85, int
                 
             def add_batch(name):
                 def tmp(_, inp, out):
@@ -246,21 +255,23 @@ def quantize_model_gptq_llama(model, device, args, dataloader):
             for name in subset:
                 handles.append(subset[name].register_forward_hook(add_batch(name)))
             for j in range(args.nsamples):
-                layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
+                layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0] #- get hessian
             for h in handles:
                 h.remove()
             
             for name in subset:
                 gptq[name].fasterquant(
-                    percdamp=args.percdamp, groupsize=args.weight_group_size
+                    percdamp=args.percdamp, groupsize=args.weight_group_size #- 0.01, 128
                 )
-                quantizers['model.layers.%d.%s' % (i, name)] = gptq[name].quantizer.cpu()
+                subset[name].quantizer = deepcopy(gptq[name].quantizer.cpu())
+                quantizers['model.layers.%d.%s' % (i, name)] = gptq[name].quantizer.cpu() #- save quantizer for later use
+                # torch.save(quantizers['model.layers.%d.%s' % (i, name)], f'model.layers.{i}.{name}_quantizer.pth')
                 gptq[name].free()
 
             del gptq
 
         for j in range(args.nsamples):
-            outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
+            outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0] #- get output for next layer
 
         layers[i] = layer.cpu()
         del layer, m

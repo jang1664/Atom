@@ -80,7 +80,7 @@ class QLinearLayer(nn.Module):
     def reorder(self, in_reorder_index, out_reorder_index=None):
         if self.args.reorder == True:
             in_reorder_index = in_reorder_index.to(self.weight.device)
-            self.weight = torch.index_select(self.weight, 1, in_reorder_index)
+            self.weight = torch.index_select(self.weight, 1, in_reorder_index) #- weight was transposed
             if out_reorder_index is not None:
                 out_reorder_index = out_reorder_index.to(self.weight.device)
                 self.weight = torch.index_select(self.weight, 0, out_reorder_index)

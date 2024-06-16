@@ -18,7 +18,7 @@ def get_act_stats_llama(model, dataloader, device_, metric='hessian'):
         if metric == 'hessian':
             tensorH = math.sqrt(2 / nsamples) * tensor.float().t()
             comming_H = tensorH.matmul(tensorH.t())
-            comming_scales = torch.diag(comming_H)
+            comming_scales = torch.diag(comming_H) #- L2 norm of each columns for tensor
         else:
             # Here we use abs since symmetric quantization use absmax.
             comming_scales = torch.mean(tensor.abs(), dim=0).float().cpu()
@@ -38,15 +38,15 @@ def get_act_stats_llama(model, dataloader, device_, metric='hessian'):
         if isinstance(y, tuple):
             y = y[0]
             assert isinstance(y, torch.Tensor)
-        stat_tensor(name + ".input", x)
-        stat_tensor(name + ".output", y)
+        stat_tensor(name + ".input", x) #- get channel-wise L2 norm
+        stat_tensor(name + ".output", y) #- get channel-wise L2 norm
 
     hooks = []
     for name, m in model.model.named_modules():
         if isinstance(m, nn.Linear):
             hooks.append(
                 m.register_forward_hook(
-                    functools.partial(stat_input_hook, name=name)
+                    functools.partial(stat_input_hook, name=name) #- hook the function with name fixed
                 )
             )
 
@@ -70,18 +70,18 @@ def get_act_stats_llama(model, dataloader, device_, metric='hessian'):
         def forward(self, inp, **kwargs):
             inps[cache['i']] = inp.squeeze(0)
             cache['i'] += 1
-            cache['attention_mask'] = kwargs['attention_mask']
-            cache['position_ids'] = kwargs['position_ids']
+            cache['attention_mask'] = kwargs['attention_mask'] #- causal mask
+            cache['position_ids'] = kwargs['position_ids'] #- position of tokens
             raise ValueError
     layers[0] = Catcher(layers[0])
-    for batch in dataloader:
+    for batch in dataloader: #- catch input of first layer and store in cache
         try:
             model(batch[0].to(device))
         except ValueError:
             pass
     assert cache['i'] == nsamples, "Captured samples should be equal to nsamples"
     
-    layers[0] = layers[0].module
+    layers[0] = layers[0].module #- restore
     layers[0] = layers[0].cpu()
     model.model.embed_tokens = model.model.embed_tokens.cpu()
     if not model.model.norm.weight.is_meta:
@@ -98,9 +98,9 @@ def get_act_stats_llama(model, dataloader, device_, metric='hessian'):
             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
         layers[i] = layer.cpu()
         del layer
-        inps, outs = outs, inps
+        inps, outs = outs, inps #- for saving memory
 
-    for h in hooks:
+    for h in hooks: #- remove hook
         h.remove()
 
     return act_scales 
@@ -239,10 +239,10 @@ def get_reorder_index(model, act_scales):
             # Reorder Index of each layer's input
             # Used to reorder the weight and previous layer's output
             inputName = name + ".input"
-            act_orders[inputName] = reorder_tensor(act_scales[inputName])
+            act_orders[inputName] = reorder_tensor(act_scales[inputName]) #- get reorder index by using act scales
             assert act_orders[inputName].dim() == 1, "Return Index must be 1 dimensional"
 
-            # Reorder Index of Q,K,V's output (Self-attn's input)
+            # Reorder Index of Q,K,V's output (Self-attn's input) #- why reorder??
             # Used to determine each head's reorder index
             # Assume head_dim == 128
             outputName = name + ".output"
