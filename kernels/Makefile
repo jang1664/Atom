@@ -33,3 +33,9 @@ create_obj:
 
 test_getbit: obj/test_getbit.o obj/gemm_acim.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test_adaptive_quantize: obj/test_adaptive_quantize.o obj/gemm_acim.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test_acim_dot: obj/test_dot_acim.o obj/gemm_acim.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
