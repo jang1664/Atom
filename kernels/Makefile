@@ -39,3 +39,6 @@ test_adaptive_quantize: obj/test_adaptive_quantize.o obj/gemm_acim.o
 
 test_acim_dot: obj/test_dot_acim.o obj/gemm_acim.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test_gemm_acim: obj/test_gemm_acim.o obj/gemm_acim.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
