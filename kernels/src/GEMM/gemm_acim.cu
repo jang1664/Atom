@@ -14,7 +14,7 @@
 #define VECTOR_WIDTH 4
 #define TILE_SIZE_M 256
 #define TILE_SIZE_N 128
-#define TILE_SIZE_K 16
+#define TILE_SIZE_K 128
 #define WORK_PER_THREAD_M 8
 #define WORK_PER_THREAD_N 8
 #define NUM_LOCAL_THREAD_M (TILE_SIZE_M / WORK_PER_THREAD_M)
@@ -73,6 +73,7 @@ __device__ int dot_acim_(const int *A, const int *B, const int K, const int inpu
                          const int weight_bw, const bool quant) {
   int result = 0;
   int psum = 0;
+  // printf("K: %d\n", K);
 
   int *a_bp = new int[4 * K];
   int *b_bp = new int[4 * K];
@@ -84,6 +85,7 @@ __device__ int dot_acim_(const int *A, const int *B, const int K, const int inpu
         int a = get_bit_(A[k], ibw);
         int b = get_bit_(B[k], wbw);
         psum += a * b;
+        // printf("A[%d]: %d, B[%d]: %d, a: %d, b: %d, psum: %d\n", k, A[k], k, B[k], a, b, psum);
         // printf("ibw: %d, wbw: %d, a: %d, b: %d, psum: %d\n", ibw, wbw, a, b, psum);
       }
       if (quant) {
@@ -99,7 +101,9 @@ __device__ int dot_acim_(const int *A, const int *B, const int K, const int inpu
         psum = -psum;
       }
 
+      // printf("ibw: %d, wbw: %d, psum: %d\n", ibw, wbw, psum);
       result += (psum << (ibw + wbw));
+      // printf("result: %d\n", result);
     }
   }
 
@@ -110,7 +114,7 @@ __global__ void gemm_acim_(const int *A, const int *B, int *C, const int M, cons
                            const int K, const int input_bw, const int weight_bw, const bool quant) {
   int global_row = blockIdx.y * blockDim.y + threadIdx.y;
   int global_col = blockIdx.x * blockDim.x + threadIdx.x;
-  const int k_tile_size = 256;
+  const int k_tile_size = TILE_SIZE_K;
 
   if ((global_row < M) && (global_col < N)) {
     for (int k = 0; k < K; k = k + k_tile_size) {
@@ -121,7 +125,30 @@ __global__ void gemm_acim_(const int *A, const int *B, int *C, const int M, cons
   }
 }
 
-__global__ void transpose(const int ROW, const int COL, const int *input, int *output) {
+__global__ void gemm_acim_with_scale_(const int *A, const int *B, float *C, const int M,
+                                      const int N, const int K, const int input_bw,
+                                      const int weight_bw, const float *in_scale,
+                                      const float *weight_scale, const bool quant) {
+  int global_row = blockIdx.y * blockDim.y + threadIdx.y;
+  int global_col = blockIdx.x * blockDim.x + threadIdx.x;
+  const int k_tile_size = TILE_SIZE_K;
+  const int scale_per_row = K / k_tile_size;
+  __glibcxx_assert(K % k_tile_size == 0);
+
+  if ((global_row < M) && (global_col < N)) {
+    for (int k = 0; k < K; k = k + k_tile_size) {
+      int size = min(k_tile_size, K - k);
+      float iscale = in_scale[global_row * scale_per_row + k / k_tile_size];
+      float wscale = weight_scale[global_col * scale_per_row + k / k_tile_size];
+      C[global_row * N + global_col] += (dot_acim_(&A[global_row * K + k], &B[global_col * K + k],
+                                                   size, input_bw, weight_bw, quant) *
+                                         iscale * wscale);
+    }
+  }
+}
+
+template <typename T>
+__global__ void transpose(const int ROW, const int COL, const T *input, T *output) {
 
   // Thread identifiers
   const int local_tcol = threadIdx.x;
@@ -129,6 +156,7 @@ __global__ void transpose(const int ROW, const int COL, const int *input, int *o
 
   const int global_tcol = blockIdx.x * TRANSPOSE_NUM_LOCAL_THREAD_COL + local_tcol; // 0..Q
   const int global_trow = blockIdx.y * TRANSPOSE_NUM_LOCAL_THREAD_ROW + local_trow; // 0..P
+  // printf("global_tcol: %d, global_trow: %d\n", global_tcol, global_trow);
 
   __shared__ float buffer[TRANSPOSE_NUM_LOCAL_THREAD_ROW]
                          [TRANSPOSE_NUM_LOCAL_THREAD_COL]; // one SM -> one thread block
@@ -191,9 +219,9 @@ void gemm_acim(const int *A, const int *B, int *C, const int M, const int N, con
 
   // transpose
   dim3 transpose_block(TRANSPOSE_NUM_LOCAL_THREAD_COL, TRANSPOSE_NUM_LOCAL_THREAD_ROW);
-  dim3 transpose_grid(CEIL_DIV(K, TRANSPOSE_NUM_LOCAL_THREAD_COL),
-                      CEIL_DIV(N, TRANSPOSE_NUM_LOCAL_THREAD_ROW));
-  transpose<<<transpose_grid, transpose_block>>>(K, N, B_gpu, BT_gpu);
+  dim3 transpose_grid(CEIL_DIV(N, TRANSPOSE_NUM_LOCAL_THREAD_COL),
+                      CEIL_DIV(K, TRANSPOSE_NUM_LOCAL_THREAD_ROW));
+  transpose<int><<<transpose_grid, transpose_block>>>(K, N, B_gpu, BT_gpu);
 
   dim3 block(32, 32);
   dim3 grid(CEIL_DIV(N, block.x), CEIL_DIV(M, block.y));
@@ -205,6 +233,59 @@ void gemm_acim(const int *A, const int *B, int *C, const int M, const int N, con
   CHECK_CUDA(cudaFree(B_gpu));
   CHECK_CUDA(cudaFree(C_gpu));
   CHECK_CUDA(cudaFree(BT_gpu));
+}
+
+void gemm_acim_with_scale(const int *A, const int *B, float *C, const int M, const int N,
+                          const int K, const float *in_scale, const float *weight_scale,
+                          const int input_bw, const int weight_bw, const bool quant) {
+
+  int *A_gpu, *B_gpu, *BT_gpu;
+  float *C_gpu;
+  float *in_scale_gpu, *weight_scale_gpu, *weight_scale_gpu_T;
+
+  CHECK_CUDA(cudaMalloc(&A_gpu, M * K * sizeof(int)));
+  CHECK_CUDA(cudaMalloc(&B_gpu, K * N * sizeof(int)));
+  CHECK_CUDA(cudaMalloc(&C_gpu, M * N * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&BT_gpu, N * K * sizeof(int)));
+  CHECK_CUDA(cudaMalloc(&in_scale_gpu, (M * K) / TILE_SIZE_K * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&weight_scale_gpu, (K * N) / TILE_SIZE_K * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&weight_scale_gpu_T, (K * N) / TILE_SIZE_K * sizeof(float)));
+
+  CHECK_CUDA(cudaMemcpy(A_gpu, A, M * K * sizeof(int), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpy(B_gpu, B, K * N * sizeof(int), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpy(in_scale_gpu, in_scale, (M * K) / TILE_SIZE_K * sizeof(float),
+                        cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpy(weight_scale_gpu, weight_scale, (K * N) / TILE_SIZE_K * sizeof(float),
+                        cudaMemcpyHostToDevice));
+
+  // transpose
+  dim3 transpose_block(TRANSPOSE_NUM_LOCAL_THREAD_COL, TRANSPOSE_NUM_LOCAL_THREAD_ROW);
+  dim3 transpose_grid(CEIL_DIV(N, TRANSPOSE_NUM_LOCAL_THREAD_COL),
+                      CEIL_DIV(K, TRANSPOSE_NUM_LOCAL_THREAD_ROW));
+  // printf("block.x %d, block.y %d\n", transpose_block.x, transpose_block.y);
+  // printf("grid.x %d, grid.y %d\n", transpose_grid.x, transpose_grid.y);
+  transpose<int><<<transpose_grid, transpose_block>>>(K, N, B_gpu, BT_gpu);
+
+  dim3 transpose_block_2(TRANSPOSE_NUM_LOCAL_THREAD_COL, TRANSPOSE_NUM_LOCAL_THREAD_ROW);
+  dim3 transpose_grid_2(CEIL_DIV(N, TRANSPOSE_NUM_LOCAL_THREAD_COL),
+                        CEIL_DIV(K / TILE_SIZE_K, TRANSPOSE_NUM_LOCAL_THREAD_ROW));
+  transpose<float><<<transpose_grid_2, transpose_block_2>>>(K / TILE_SIZE_K, N, weight_scale_gpu,
+                                                            weight_scale_gpu_T);
+
+  dim3 block(32, 32);
+  dim3 grid(CEIL_DIV(N, block.x), CEIL_DIV(M, block.y));
+  gemm_acim_with_scale_<<<grid, block>>>(A_gpu, BT_gpu, C_gpu, M, N, K, input_bw, weight_bw,
+                                         in_scale_gpu, weight_scale_gpu_T, quant);
+
+  CHECK_CUDA(cudaMemcpy(C, C_gpu, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+
+  CHECK_CUDA(cudaFree(A_gpu));
+  CHECK_CUDA(cudaFree(B_gpu));
+  CHECK_CUDA(cudaFree(C_gpu));
+  CHECK_CUDA(cudaFree(BT_gpu));
+  CHECK_CUDA(cudaFree(in_scale_gpu));
+  CHECK_CUDA(cudaFree(weight_scale_gpu));
+  CHECK_CUDA(cudaFree(weight_scale_gpu_T));
 }
 
 // ====================================================================================================

@@ -1,16 +1,2 @@
-in: 16, div: 2.000000, val: 16
-in: 17, div: 2.000000, val: 16
-in: 18, div: 2.000000, val: 18
-in: 19, div: 2.000000, val: 20
-in: 20, div: 2.000000, val: 20
-in: 21, div: 2.000000, val: 20
-in: 22, div: 2.000000, val: 22
-in: 23, div: 2.000000, val: 24
-in: 24, div: 2.000000, val: 24
-in: 25, div: 2.000000, val: 24
-in: 26, div: 2.000000, val: 26
-in: 27, div: 2.000000, val: 28
-in: 28, div: 2.000000, val: 28
-in: 29, div: 2.000000, val: 28
-in: 30, div: 2.000000, val: 30
-in: 31, div: 4.000000, val: 32
+Results match
+GFLOPS: 2.46607e-09

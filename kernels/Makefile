@@ -42,3 +42,6 @@ test_acim_dot: obj/test_dot_acim.o obj/gemm_acim.o
 
 test_gemm_acim: obj/test_gemm_acim.o obj/gemm_acim.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test_gemm_acim_with_scale: obj/test_gemm_acim_with_scale.o obj/gemm_acim.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
