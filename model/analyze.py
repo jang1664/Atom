@@ -87,7 +87,7 @@ def load_model(args):
 
   return model
 
-def get_quant_scale(weight):
+def get_weight_quant_scale(weight):
   # weight = weight.float()
   weight = weight
   shape = weight.shape
@@ -293,7 +293,7 @@ def extract_io(model, testenc, dev):
 
 #     return quantized_value, scales, bases, dequantized_value
 
-def get_qunat_input(input_tensor):
+def get_input_qunat_scale(input_tensor):
   # input_tensor = input_tensor.float()
   input_tensor = input_tensor.squeeze(0)
   shape = input_tensor.shape
@@ -341,7 +341,7 @@ def get_input_quant_param_dict(inputs):
     dequantized_inputs[f"{name}.dequantized_input"] = []
     for i, tensor in enumerate(tensor_list):
       # quantized_value, scale, base, dequantized_value = get_qunat_input(tensor)
-      scale = get_qunat_input(tensor)
+      scale = get_input_qunat_scale(tensor)
       # quantized_inputs[f"{name}.quantized_input"].append(quantized_value.cpu())
       scales[f"{name}.scale"].append(scale.cpu())
       # bases[f"{name}.base"].append(base.cpu())
@@ -354,7 +354,13 @@ def get_weight_quant_param_dict(model):
   scales = {}
   for name, m in model.model.named_modules():
       if isinstance(m, QLinearLayer):
-        ns = get_quant_scale(m.weight.cpu())
+        ns = get_weight_quant_scale(m.weight.cpu())
         scales[f"{name}.scale"] = ns
   
   return scales
+
+def set_nested_attr(obj, attr_path, value):
+    attrs = attr_path.split('.')
+    for attr in attrs[:-1]:
+        obj = getattr(obj, attr)
+    setattr(obj, attrs[-1], value)

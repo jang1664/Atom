@@ -6,3 +6,5 @@ model,bit,wiki2,ptb,c4,ptb-new,c4-new
 llama2-7b,4,,,,,
 model,bit,wiki2,ptb,c4,ptb-new,c4-new
 llama2-7b,4,6.025,,,,
+model,bit,wiki2,ptb,c4,ptb-new,c4-new
+llama2-7b,4,,,,,
