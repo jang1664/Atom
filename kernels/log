@@ -1,2 +1,20 @@
-Results match
-GFLOPS: 2.46607e-09
+========= COMPUTE-SANITIZER
+========= Program hit cudaErrorInvalidValue (error 1) due to "invalid argument" on CUDA API call to cudaMemcpy.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /usr/lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaMemcpy [0x68708]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:gemv_acim_with_scale_v1(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, bool) [0x1eeb]
+=========                in /root/project/Atom/kernels/./test_gemv_acim_with_scale_v1
+=========     Host Frame:main [0x1509]
+=========                in /root/project/Atom/kernels/./test_gemv_acim_with_scale_v1
+=========     Host Frame: [0x29d90]
+=========                in /usr/lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:__libc_start_main [0x29e40]
+=========                in /usr/lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x1885]
+=========                in /root/project/Atom/kernels/./test_gemv_acim_with_scale_v1
+========= 
+========= Target application returned an error
+========= ERROR SUMMARY: 1 error

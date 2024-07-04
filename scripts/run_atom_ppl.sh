@@ -13,6 +13,7 @@ cmd_group="--act_group_size 128 --weight_group_size 128 --weight_channel_group 2
 cmd_reorder="--reorder --act_sort_metric hessian --cache_index"
 cmd_clip="--a_clip_ratio 0.9 --w_clip_ratio 0.85 --kv_clip_ratio 1.0"
 cmd_adv="--keeper 128 --keeper_precision 3 --kv_cache --use_gptq"
+# cmd_eval="--eval_ppl --exit_on_save"
 cmd_eval="--eval_ppl"
 
 dir=$(pwd)

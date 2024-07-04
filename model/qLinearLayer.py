@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from quant import fake_quantize_quarter_E5M2, fake_quantize_quarter_E4M3, quantize_tensor, quantize_tensor_channel_group
-import analyze
+import gemm_acim
 
 def find_qlinear_layers(module, name=''):
     if type(module) == QLinearLayer:
@@ -29,15 +29,22 @@ class QLinearLayer(nn.Module):
             self.register_buffer('bias', originalLayer.bias)
         else:
             self.bias = None
+        self.weight_maxq = None
+        self.weight_scale = None
+        self.weight_zero = None
         
     @torch.no_grad()
-    def forward(self, x):
+    def forward(self, x, x_int, x_scale):
+        # print(x.dtype) 
+        # print(self.weight.dtype)
         y = torch.functional.F.linear(x, self.weight, self.bias)
         return y
     
     def to(self, *args, **kwargs):
         super(QLinearLayer, self).to(*args, **kwargs)
         self.weight = self.weight.to(*args, **kwargs)
+        if self.weight_scale is not None:
+          self.weight_scale = self.weight_scale.to(*args, **kwargs)
         return self
     
     @torch.no_grad()
@@ -56,7 +63,7 @@ class QLinearLayer(nn.Module):
             elif self.args.keeper_precision == 2:
                 saved_w = fake_quantize_quarter_E4M3(saved_w)
             elif self.args.keeper_precision == 3:
-                saved_w = quantize_tensor(saved_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
+                saved_w, _, _ = quantize_tensor(saved_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
 
         if self.args.keeper > 0:
             self.weight[:, -self.args.keeper:] = 0
@@ -96,37 +103,81 @@ class QLinearLayerV2(nn.Module):
         self.register_buffer('weight', None)
         self.enable_quant = None # whether to allow quant on weights, default True
         self.bias = None
-        
+        self.weight_scale = None
+        self.name = None
+    
     @torch.no_grad()
-    def forward(self, x):
+    # def construct(self, origin_layer:QLinearLayer, kdim):
+    def construct(self, origin_layer:QLinearLayer):
+        # self.weight = origin_layer.weight[:, :kdim]
+        self.weight = origin_layer.weight
+        # self.weight_scale = origin_layer.weight_scale[:, :kdim//128]
+        self.weight_scale = origin_layer.weight_scale
+        self.bias = origin_layer.bias
+        self.args = origin_layer.args
+        self.enable_quant = origin_layer.enable_quant
+        self.weight_int = torch.round(self.weight/torch.repeat_interleave(self.weight_scale, 128, dim=-1)).to(torch.int8)
+        return self
+
+    @torch.no_grad()
+    def forward(self, x, x_int, x_scale):
+        # x_dequant = x_int * torch.repeat_interleave(x_scale, 128, dim=-1)
+        # err_cnt = torch.sum(torch.abs(x - x_dequant) > 1e-5)
+        # if err_cnt > 0:
+        #   print(f"{self.name} ACT Error count : {err_cnt}")
+        
+        # w_dequant = self.weight_int.to(torch.float16) * torch.repeat_interleave(self.weight_scale, 128, dim=-1)
+        # err_cnt = torch.sum(torch.abs(self.weight - w_dequant) > 1e-5)
+        # if err_cnt > 0:
+        #   print(f"{self.name} WEIGHT Error count : {err_cnt}")
+
+        # output = torch.functional.F.linear(x_dequant, w_dequant, None)
+
         out_shape = [x.shape[0], x.shape[1], self.weight.shape[0]]
-        weight_scales = analyze.get_weight_quant_scale(self.weight.cpu())
-        output = torch.zeros(out_shape, device=x.device, dtype=x.dtype)
+        # weight_scales = analyze.get_weight_quant_scale(self.weight.cpu())
+        # output = torch.zeros(out_shape, device=x.device, dtype=torch.float16)
+        output = torch.zeros(out_shape, device=x.device, dtype=torch.float32)
+        # output = torch.zeros(out_shape, device=x.device, dtype=torch.float64)
 
         for i in range(x.shape[0]):
-          input_scales = analyze.get_input_qunat_scale(x.cpu())
+          # input_scales = analyze.get_input_qunat_scale(x.cpu())
           for k in range(0, x.shape[2], 128):
-            input_chunk = x[i, :, k:k+128]
-            input_scale = input_scales[:, k//128:k//128+1].to(x.device)
-            weight_chunk = self.weight[:, k:k+128]
-            weight_scale = weight_scales[:, k//128:k//128+1].to(x.device)
+            input_chunk = x_int[i, :, k:k+128]
+            input_scale = x_scale[i, :, k//128:k//128+1]
+            weight_chunk = self.weight_int[:, k:k+128]
+            weight_scale = self.weight_scale[:, k//128:k//128+1]
 
-            quant_input = torch.round(input_chunk / input_scale).to(dtype=x.dtype)
-            quant_weight = torch.round(weight_chunk / weight_scale).to(dtype=x.dtype)
-            scale_mat = torch.matmul(input_scale, weight_scale.T)
-            output[i, :, :] += (torch.functional.F.linear(quant_input, quant_weight, None) * scale_mat)
+            # input_dequant = input_chunk.to(torch.float64) * input_scale.to(torch.float64)
+            # weight_dequant = weight_chunk.to(torch.float64) * weight_scale.to(torch.float64)
+            # input_dequant = input_chunk.to(torch.float16) * input_scale
+            # weight_dequant = weight_chunk.to(torch.float16) * weight_scale
+            # output[i, :, :] += torch.functional.F.linear(input_dequant, weight_dequant)
+            # output[i, :, :] += torch.functional.F.linear(input_dequant.to(torch), weight_dequant).to(torch.float64)
+            # output[i, :, :] += torch.functional.F.linear(input_dequant.to(torch.float64), weight_dequant.to(torch.float64)).to(torch.float64)
+            # output[i, :, :] += torch.functional.F.linear(input_dequant.to(torch.float32), weight_dequant.to(torch.float32)).to(torch.float32)
 
-        # y = torch.functional.F.linear(x, self.weight, self.bias)
-        # print(f"input shape : {x.shape}")
-        # print(f"weight shape : {self.weight.shape}")
-        # print(f"bias : {self.bias}")
-        return output
+            # quant_input = torch.round(input_chunk / input_scale).to(dtype=x.dtype)
+            # quant_weight = torch.round(weight_chunk / weight_scale).to(dtype=x.dtype)
+
+            scale_mat = torch.functional.F.linear(input_scale.to(torch.float32), weight_scale.to(torch.float32))
+            output[i, :, :] += (torch.functional.F.linear(input_chunk.to(torch.float32), weight_chunk.to(torch.float32)) * scale_mat)
+
+            # output[i, :, :] += (torch.functional.F.linear(input_chunk.to(torch.float16), weight_chunk.to(torch.float16), None) * scale_mat).to(torch.float32)
+
+        # # y = torch.functional.F.linear(x, self.weight, self.bias)
+        # # print(f"input shape : {x.shape}")
+        # # print(f"weight shape : {self.weight.shape}")
+        # # print(f"bias : {self.bias}")
+
+        return output.to(torch.float16)
     
     def to(self, *args, **kwargs):
         # print(type(self))
         # print(isinstance(self, QLinearLayerV2))
         super(QLinearLayerV2, self).to(*args, **kwargs)
         self.weight = self.weight.to(*args, **kwargs)
+        self.weight_int = self.weight_int.to(*args, **kwargs)
+        self.weight_scale = self.weight_scale.to(*args, **kwargs)
         return self
     
     @torch.no_grad()
@@ -145,7 +196,7 @@ class QLinearLayerV2(nn.Module):
             elif self.args.keeper_precision == 2:
                 saved_w = fake_quantize_quarter_E4M3(saved_w)
             elif self.args.keeper_precision == 3:
-                saved_w = quantize_tensor(saved_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
+                saved_w, _, _ = quantize_tensor(saved_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
 
         if self.args.keeper > 0:
             self.weight[:, -self.args.keeper:] = 0
@@ -185,18 +236,49 @@ class QLinearLayerACIM(nn.Module):
         self.register_buffer('weight', None)
         self.enable_quant = None # whether to allow quant on weights, default True
         self.bias = None
-        
+        self.weight_scale = None
+        self.name = None
+    
     @torch.no_grad()
-    def forward(self, x):
-        y = torch.functional.F.linear(x, self.weight, self.bias)
-        # print("hi i'm v2 qlinear")
-        return y
+    def construct(self, origin_layer:QLinearLayer):
+        self.weight = origin_layer.weight
+        self.weight_scale = origin_layer.weight_scale
+        self.bias = origin_layer.bias
+        self.args = origin_layer.args
+        self.enable_quant = origin_layer.enable_quant
+        self.weight_int = torch.round(self.weight/torch.repeat_interleave(self.weight_scale, 128, dim=-1)).to(torch.int8)
+        return self
+
+    @torch.no_grad()
+    def forward(self, x, x_int, x_scale):
+        # x_dequant = x_int * torch.repeat_interleave(x_scale, 128, dim=-1)
+        # err_cnt = torch.sum(torch.abs(x - x_dequant) > 1e-5)
+        # if err_cnt > 0:
+        #   print(f"{self.name} ACT Error count : {err_cnt}")
+        
+        # w_dequant = self.weight_int.to(torch.float16) * torch.repeat_interleave(self.weight_scale, 128, dim=-1)
+        # err_cnt = torch.sum(torch.abs(self.weight - w_dequant) > 1e-5)
+        # if err_cnt > 0:
+        #   print(f"{self.name} WEIGHT Error count : {err_cnt}")
+        print(f"{self.name} Run")
+        out_shape = [x.shape[0], x.shape[1], self.weight.shape[0]]
+        output = torch.zeros(out_shape, device=x.device, dtype=torch.float32)
+
+        for i in range(x_int.shape[0]):
+          output[i, :, :] = gemm_acim.forward(
+              x_int[i, :, :].to(torch.int32),
+              self.weight_int.to(torch.int32),
+              x_scale[i, :, :].to(torch.float32),
+              self.weight_scale.to(torch.float32),
+              4, 4, False).reshape([x.shape[1], self.weight.shape[0]])
+
+        return output.to(torch.float16)
     
     def to(self, *args, **kwargs):
-        # print(type(self))
-        # print(isinstance(self, QLinearLayerV2))
-        super(QLinearLayerV2, self).to(*args, **kwargs)
+        super(QLinearLayerACIM, self).to(*args, **kwargs)
         self.weight = self.weight.to(*args, **kwargs)
+        self.weight_int = self.weight_int.to(*args, **kwargs)
+        self.weight_scale = self.weight_scale.to(*args, **kwargs)
         return self
     
     @torch.no_grad()
@@ -215,7 +297,7 @@ class QLinearLayerACIM(nn.Module):
             elif self.args.keeper_precision == 2:
                 saved_w = fake_quantize_quarter_E4M3(saved_w)
             elif self.args.keeper_precision == 3:
-                saved_w = quantize_tensor(saved_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
+                saved_w, _, _ = quantize_tensor(saved_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False)
 
         if self.args.keeper > 0:
             self.weight[:, -self.args.keeper:] = 0

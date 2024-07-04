@@ -162,6 +162,7 @@ def quantize_model_llama(model, device, args):
     return model
 
 def quantize_model_gptq_llama(model, device, args, dataloader):
+    import analyze
     print('Starting GPTQ quantization ...')
 
     use_cache = model.config.use_cache
@@ -207,7 +208,7 @@ def quantize_model_gptq_llama(model, device, args, dataloader):
     attention_mask = cache['attention_mask']
     position_ids = cache['position_ids']
 
-    quantizers = {}
+    # quantizers = {}
     for i in tqdm(range(len(layers))):
         if isinstance(layers[i], LlamaDecoderLayer):
             m = QLlamaDecoderLayer(
@@ -231,7 +232,7 @@ def quantize_model_gptq_llama(model, device, args, dataloader):
         sequential = [list(block_layers.keys())]
        
         for names in sequential:
-            subset = {n: block_layers[n] for n in names} #- same with block_layers
+            subset = {n: block_layers[n] for n in names} #- same with block_layers. but copied
 
             gptq = {}
             for name in subset:
@@ -264,8 +265,11 @@ def quantize_model_gptq_llama(model, device, args, dataloader):
                     percdamp=args.percdamp, groupsize=args.weight_group_size #- 0.01, 128
                 )
                 subset[name].quantizer = deepcopy(gptq[name].quantizer.cpu())
-                quantizers['model.layers.%d.%s' % (i, name)] = gptq[name].quantizer.cpu() #- save quantizer for later use
+                # quantizers['model.layers.%d.%s' % (i, name)] = gptq[name].quantizer.cpu() #- save quantizer for later use
                 # torch.save(quantizers['model.layers.%d.%s' % (i, name)], f'model.layers.{i}.{name}_quantizer.pth')
+                # analyze.set_nested_attr(model, f"model.layers.{i}.{name}.weight_maxq", gptq[name].quantizer.maxq)
+                analyze.set_nested_attr(model, f"model.layers.{i}.{name}.weight_scale", gptq[name].scale)
+                # analyze.set_nested_attr(model, f"model.layers.{i}.{name}.weight_zero", gptq[name].quantizer.zero)
                 gptq[name].free()
 
             del gptq

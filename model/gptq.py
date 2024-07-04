@@ -38,8 +38,11 @@ def quantize_gptq(x, scale, zero, maxq, channel_group, quant_type="int"):
     # x's layout: [num_groups, group_size]
     if quant_type == "int":
         # Uniform affine mapping
+        x = x.to(torch.float16)
+        scale = scale.to(torch.float16)
         q = torch.clamp(torch.round(x / scale) + zero, 0, maxq)
         q = scale * (q - zero)
+        q = q.float()
     else:
         assert quant_type == "fp", "Currently only support [int, fp]."
         cur_group_size = x.shape[1]
@@ -177,8 +180,8 @@ class Quantizer_GPTQ(nn.Module):
 
         if weight:
             shape = [-1] + [1] * (len(shape) - 1)
-            self.scale = self.scale.reshape(shape) #- make 2D. value for a output channel
-            self.zero = self.zero.reshape(shape)
+            self.scale = self.scale.reshape(shape).to(torch.float16).float() #- make 2D. value for a output channel
+            self.zero = self.zero.reshape(shape).to(torch.float16).float()
             return
         if len(shape) == 4:
             self.scale = self.scale.reshape((1, -1, 1, 1))
@@ -219,11 +222,14 @@ class GPTQ:
         self.rows = W.shape[0] #- output channel
         self.columns = W.shape[1]  #- input channel
         self.H = torch.zeros((self.columns, self.columns), device=self.dev) #- (hidden_dim, hidden_dim)
+        # self.H = torch.zeros((self.columns, self.columns), device=self.dev, dtype=W.dtype) #- (hidden_dim, hidden_dim)
         self.nsamples = 0 
         self.keeper_precision = keeper_precision
 
         self.n_out = n_out
         self.n_nonout = W.shape[1] - n_out
+        self.quantizer = None
+        self.scale = None
         del W
 
     def add_batch(self, inp, out):
@@ -260,6 +266,9 @@ class GPTQ:
         if isinstance(self.layer, transformers.Conv1D):
             W = W.t()
         W = W.float()
+
+
+        self.scale = torch.zeros(W.shape[:-1] + (W.shape[-1]//groupsize,), dtype=torch.float16)
                 
         if not self.quantizer.ready():
             self.quantizer.find_params(W[:,:self.n_nonout], weight=True) #- find param for non-outliers. for real perchannel quantize
@@ -300,10 +309,16 @@ class GPTQ:
                 if groupsize > 0:
                     if (i1 + i) % groupsize == 0: #- block can be greater than group_size. for group wise quantize
                         self.quantizer.find_params(W[:, (i1 + i):min((i1 + i + groupsize), self.n_nonout)], weight=True) #- find param for group
+                        # self.quantizer.find_params(W.to(torch.float16)[:, (i1 + i):min((i1 + i + groupsize), self.n_nonout)], weight=True) #- find param for group
+                        self.scale[:, (i1 + i)//groupsize] = torch.repeat_interleave(self.quantizer.scale, self.quantizer.channel_group, dim=0).squeeze(1)
                 q = quantize_gptq(
                     w.unsqueeze(1), self.quantizer.scale, self.quantizer.zero,
                     self.quantizer.maxq, self.quantizer.channel_group, self.quantizer.quant_type
                 ).flatten() #- quantized value for a output channel
+                # q = quantize_gptq(
+                #     w.to(torch.float16).unsqueeze(1), self.quantizer.scale, self.quantizer.zero,
+                #     self.quantizer.maxq, self.quantizer.channel_group, self.quantizer.quant_type
+                # ).flatten() #- quantized value for a output channel
                 Q1[:, i] = q
                 Losses1[:, i] = (w - q) ** 2 / d ** 2
 
@@ -329,7 +344,8 @@ class GPTQ:
                 elif self.keeper_precision == 2:
                     keep_w = fake_quantize_quarter_E4M3(keep_w)
                 elif self.keeper_precision == 3:
-                    keep_w = quantize_tensor(keep_w, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False) #- 8bit quantization for outlier. no channel group
+                    keep_w, keep_w_int, keep_w_scale = quantize_tensor(keep_w.to(torch.float16), n_bits=8, group_size=0, tiling=0, sym=True, exponential=False) #- 8bit quantization for outlier. no channel group
+                    self.scale[:, -1] = keep_w_scale.squeeze(1)
 
             Q[:,self.n_nonout:] = keep_w
 

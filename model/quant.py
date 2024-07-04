@@ -75,7 +75,7 @@ def quantize_tensor_channel_group(W: torch.tensor, n_bits, group_size, tiling, s
 
     # group_size = 0 is per-channel quantization.
     if group_size == 0:
-        W = quantize_tensor(W, n_bits=n_bits, group_size=0, tiling=tiling, sym=sym, exponential=exponential)
+        W, _, _ = quantize_tensor(W, n_bits=n_bits, group_size=0, tiling=tiling, sym=sym, exponential=exponential)
     else:
         for i1 in range(0, W.shape[1], group_size):
             i2 = min(i1 + group_size, W.shape[1])
@@ -88,7 +88,7 @@ def quantize_tensor_channel_group(W: torch.tensor, n_bits, group_size, tiling, s
             
             # group_size is set to 0 because the layout is
             # already [num_groups, group_size]
-            w = quantize_tensor(
+            w, _, _ = quantize_tensor(
                 w,
                 n_bits=n_bits,
                 group_size=0,
@@ -178,10 +178,12 @@ def quantize_tensor(w: torch.tensor, n_bits, group_size, tiling, sym, clip_ratio
                     w_min *= clip_ratio
                 scales = (w_max-w_min).clamp(min=1e-5) / q_max
                 base = torch.round(-w_min/scales).clamp_(min=q_min, max=q_max)
+            origin_w = w
             w = (torch.clamp(torch.round(w / scales) + base, q_min, q_max) - base) * scales
             #- scales, base, q_min, q_max should be saved
     
-    return w.reshape(savedShape)
+    last_dim = savedShape[-1]//group_size if group_size != 0 else 1
+    return w.reshape(savedShape), (torch.clamp(torch.round(origin_w / scales) + base, q_min, q_max) - base).reshape(savedShape), scales.reshape(savedShape[:-1] + (last_dim,))
 
 # Wrapper function for activation quantization
 # Simulate mixed-precision by decomposing input
@@ -193,7 +195,7 @@ def quantize_activation_wrapper(x: torch.tensor, args) -> torch.tensor:
     if args.abits >= 16:
         return x 
     
-    qFunction = partial(
+    qFunction = partial( # normal quantization is decided by args
         quantize_tensor, 
         n_bits=args.abits, 
         group_size=args.act_group_size, 
@@ -221,18 +223,23 @@ def quantize_activation_wrapper(x: torch.tensor, args) -> torch.tensor:
         elif args.keeper_precision == 2:
             saved_x = fake_quantize_quarter_E4M3(saved_x)
         elif args.keeper_precision == 3:
-            saved_x = quantize_tensor(saved_x, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False) #- channel wise 8bit sym, uniform quantization
+            saved_x, saved_x_int, saved_x_scale = quantize_tensor(saved_x, n_bits=8, group_size=0, tiling=0, sym=True, exponential=False) #- channel wise 8bit sym, uniform quantization
     # Set zero to avoid interference
     if args.keeper > 0:
         x[:, -args.keeper:] = 0
     
-    x = qFunction(x)
+    x, x_int, x_scale = qFunction(x)
     # Set back the outliers
     if args.keeper > 0:
         x[:, -args.keeper:] = saved_x
+        x_int[:, -args.keeper:] = saved_x_int
+        x_scale[:, -args.keeper//args.act_group_size:] = saved_x_scale
         del saved_x
+        del saved_x_int
+        del saved_x_scale
 
-    return x.view(savedShape)
+    last_dim = savedShape[-1]//args.act_group_size if args.act_group_size != 0 else 1
+    return x.view(savedShape), x_int.view(savedShape), x_scale.view(savedShape[:-1] + (last_dim, ))
 
 @torch.no_grad()
 def quantize_attn_v_wrapper(w: torch.tensor, args) -> torch.tensor:
@@ -244,7 +251,7 @@ def quantize_attn_v_wrapper(w: torch.tensor, args) -> torch.tensor:
     saved_shape = w.shape
     w = w.reshape(-1, head_dim)
 
-    w = quantize_tensor(w, n_bits=args.abits, group_size=0, tiling=0, sym=False, clip_ratio=args.kv_clip_ratio, exponential=False)
+    w, _, _ = quantize_tensor(w, n_bits=args.abits, group_size=0, tiling=0, sym=False, clip_ratio=args.kv_clip_ratio, exponential=False)
     return w.view(saved_shape)
 
 @torch.no_grad()
@@ -257,7 +264,7 @@ def quantize_attn_k_wrapper(w: torch.tensor, args) -> torch.tensor:
     saved_shape = w.shape
     w = w.reshape(-1, head_dim)
 
-    w = quantize_tensor(w, n_bits=args.abits, group_size=0, tiling=0, sym=False, clip_ratio=args.kv_clip_ratio, exponential=False)
+    w, _, _ = quantize_tensor(w, n_bits=args.abits, group_size=0, tiling=0, sym=False, clip_ratio=args.kv_clip_ratio, exponential=False)
     return w.view(saved_shape)
 
 class Quantizer(nn.Module):

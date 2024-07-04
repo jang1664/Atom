@@ -97,11 +97,13 @@ class QLlamaDecoderLayer(nn.Module):
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
 
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states, hidden_states_int, hidden_states_scale = self.input_layernorm(hidden_states)
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
             hidden_states=hidden_states,
+            hidden_states_int = hidden_states_int,
+            hidden_states_scale = hidden_states_scale,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_value=past_key_value,
@@ -112,8 +114,8 @@ class QLlamaDecoderLayer(nn.Module):
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
+        hidden_states, hidden_states_int, hidden_states_scale = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states, hidden_states_int, hidden_states_scale)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -146,9 +148,9 @@ class QLlamaRMSNorm(nn.Module):
             result = torch.index_select(result, result.dim()-1, self.reorder_index)
 
         if self.args.abits < 16:
-            result = self.act_quant(result)
+            result, result_int, result_scale = self.act_quant(result)
 
-        return result
+        return result, result_int, result_scale
     
     def to(self, *args, **kwargs):
         super(QLlamaRMSNorm, self).to(*args, **kwargs)
@@ -227,6 +229,8 @@ class QLlamaAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
+        hidden_states_int: torch.Tensor,
+        hidden_states_scale: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
@@ -235,9 +239,9 @@ class QLlamaAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
-        query_states = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = self.k_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = self.v_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = self.q_proj(hidden_states, hidden_states_int, hidden_states_scale).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        key_states = self.k_proj(hidden_states, hidden_states_int, hidden_states_scale).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        value_states = self.v_proj(hidden_states, hidden_states_int, hidden_states_scale).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
@@ -302,8 +306,8 @@ class QLlamaAttention(nn.Module):
             attn_output = torch.index_select(attn_output, 2, self.reorder_index)
 
         # Quantize the attention output
-        attn_output = self.act_quant(attn_output)
-        attn_output = self.o_proj(attn_output)
+        attn_output, attn_output_int, attn_output_scale = self.act_quant(attn_output)
+        attn_output = self.o_proj(attn_output, attn_output_int, attn_output_scale)
 
         if not output_attentions:
             attn_weights = None
@@ -343,9 +347,9 @@ class QLlamaMLP(nn.Module):
         return self
 
     @torch.no_grad()
-    def forward(self, x):
+    def forward(self, x, x_int, x_scale):
         # input X: [b, seq, dim]: quantized
-        tmpResult = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+        tmpResult = self.act_fn(self.gate_proj(x, x_int, x_scale)) * self.up_proj(x, x_int, x_scale)
         # Quantize the activations and feed into down_proj
-        tmpResult = self.act_quant(tmpResult)
-        return self.down_proj(tmpResult)
+        tmpResult, tmpResult_int, tmpResult_scale = self.act_quant(tmpResult)
+        return self.down_proj(tmpResult, tmpResult_int, tmpResult_scale)

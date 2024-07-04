@@ -27,20 +27,27 @@ from datautils import *
 import qLinearLayer
 
 torch.set_printoptions(precision=10)
-DEV = torch.device('cuda:0')
-model = torch.load("./saved/llama2-7b_quantized.pth").to(DEV)
+DEV = torch.device('cuda')
+model = torch.load("./saved/llama2-7b_quantized.pth", map_location=torch.device('cpu'))
+# model = model.to(DEV)
 
 changed_layers = {}
 for name, m in model.model.named_modules():
     if isinstance(m, qLinearLayer.QLinearLayer):
-      layer_v2 = qLinearLayer.QLinearLayerV2()
-      layer_v2.args = m.args
-      layer_v2.weight = m.weight
-      layer_v2.bias = m.bias
+      # layer_v2 = qLinearLayer.QLinearLayerV2()
+      layer_v2 = qLinearLayer.QLinearLayerACIM()
+      layer_v2.construct(m.to(torch.device('cpu')))
+      layer_v2.name = name
+      # layer_v2.args = m.args
+      # layer_v2.weight = m.weight
+      # layer_v2.bias = m.bias
+      del m
       changed_layers[name] = layer_v2
 
 for name, layer in changed_layers.items():
+    # if "layers.8" in name:
     analyze.set_nested_attr(model.model, name, layer)
+      # break
 
 print(model)
 
@@ -190,7 +197,7 @@ args = parser.parse_args(
     "--reorder", "--act_sort_metric", "hessian", "--cache_index",
     "--a_clip_ratio", "0.9", "--w_clip_ratio", "0.85", "--kv_clip_ratio", "1.0",
     "--keeper", "128", "--keeper_precision", "3", "--kv_cache", "--use_gptq",
-    "--eval_common_sense", "--lm_eval_limit", "-1", "--multigpu"
+    "--eval_common_sense", "--lm_eval_limit", "-1"
   ]
 )
 
