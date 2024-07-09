@@ -95,9 +95,9 @@ __global__ void gemv_acim_with_scale_kernel_v1(const char *__restrict__ A,
   //   }
   // }
 
-  if ((tid < K) && IN_BW == 4 && W_BW == 4) {
-    C[tid] = psum_shared[0];
-  }
+  // if ((tid < K) && IN_BW == 4 && W_BW == 4) {
+  //   C[tid] = psum_shared[0];
+  // }
 
   for (int n = 0; n < n_iter; n++) {
     int nidx = by * TN + warp_yidx * WN + n;
@@ -254,7 +254,8 @@ __global__ void gemv_acim_with_scale_kernel_v1(const char *__restrict__ A,
     __syncthreads();
     // store the result
     if (tx == 0) {
-      C[nidx] += psum_shared[0];
+      // C[nidx] += psum_shared[0];
+      C[nidx] = psum_shared[0];
     }
   }
 }
@@ -285,34 +286,41 @@ void gemv_acim_with_scale_v1(const char *A, const char *B, float *C, const int M
     init = true;
     CHECK_CUDA(cudaMalloc(&A_gpu, MKMAX * sizeof(char)));
     CHECK_CUDA(cudaMalloc(&B_gpu, KNMAX * sizeof(char)));
-    CHECK_CUDA(cudaMalloc(&B_out_gpu, KN_OUT_MAX * sizeof(char)));
+    // CHECK_CUDA(cudaMalloc(&B_out_gpu, KN_OUT_MAX * sizeof(char)));
     CHECK_CUDA(cudaMalloc(&C_gpu, MNMAX * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&in_scale_gpu, (MKMAX / QUANT_GROUP_SIZE) * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&weight_scale_gpu, (KNMAX / QUANT_GROUP_SIZE) * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&weight_scale_out_gpu, (KN_OUT_MAX / QUANT_GROUP_SIZE) * sizeof(float)));
+    // CHECK_CUDA(cudaMalloc(&weight_scale_out_gpu, (KN_OUT_MAX / QUANT_GROUP_SIZE) *
+    // sizeof(float)));
     CHECK_CUDA(cudaStreamCreate(&stream));
   }
 
-  for (int i = 0; i < N; i++) {
-    CHECK_CUDA(cudaMemcpyAsync(B_gpu, &B[i * K], (K - QUANT_GROUP_SIZE) * sizeof(char),
-                               cudaMemcpyHostToDevice, stream));
-    CHECK_CUDA(cudaMemcpyAsync(weight_scale_gpu, &weight_scale[i * (K / QUANT_GROUP_SIZE)],
-                               ((K - QUANT_GROUP_SIZE) / QUANT_GROUP_SIZE) * sizeof(float),
-                               cudaMemcpyHostToDevice, stream));
+  CHECK_CUDA(cudaMemcpyAsync(B_gpu, B, K * N * sizeof(char), cudaMemcpyHostToDevice, stream));
+  CHECK_CUDA(cudaMemcpyAsync(weight_scale_gpu, weight_scale,
+                             (K / QUANT_GROUP_SIZE) * N * sizeof(float), cudaMemcpyHostToDevice,
+                             stream));
+  // for (int i = 0; i < N; i++) {
+  //   CHECK_CUDA(cudaMemcpyAsync(B_gpu, &B[i * K], (K - QUANT_GROUP_SIZE) * sizeof(char),
+  //                              cudaMemcpyHostToDevice, stream));
+  //   CHECK_CUDA(cudaMemcpyAsync(weight_scale_gpu, &weight_scale[i * (K / QUANT_GROUP_SIZE)],
+  //                              ((K - QUANT_GROUP_SIZE) / QUANT_GROUP_SIZE) * sizeof(float),
+  //                              cudaMemcpyHostToDevice, stream));
 
-    CHECK_CUDA(cudaMemcpyAsync(B_out_gpu, &B[i * K + (K - QUANT_GROUP_SIZE)],
-                               QUANT_GROUP_SIZE * sizeof(char), cudaMemcpyHostToDevice, stream));
-    CHECK_CUDA(cudaMemcpyAsync(
-        weight_scale_out_gpu,
-        &weight_scale[i * (K / QUANT_GROUP_SIZE) + (K - QUANT_GROUP_SIZE) / QUANT_GROUP_SIZE],
-        sizeof(float), cudaMemcpyHostToDevice, stream));
-  }
+  //   CHECK_CUDA(cudaMemcpyAsync(B_out_gpu, &B[i * K + (K - QUANT_GROUP_SIZE)],
+  //                              QUANT_GROUP_SIZE * sizeof(char), cudaMemcpyHostToDevice, stream));
+  //   CHECK_CUDA(cudaMemcpyAsync(
+  //       weight_scale_out_gpu,
+  //       &weight_scale[i * (K / QUANT_GROUP_SIZE) + (K - QUANT_GROUP_SIZE) / QUANT_GROUP_SIZE],
+  //       sizeof(float), cudaMemcpyHostToDevice, stream));
+  // }
 
-  dim3 norm_mm_block(BLOCK_SIZE_X((K - QUANT_GROUP_SIZE)), BLOCK_SIZE_Y);
+  dim3 norm_mm_block(BLOCK_SIZE_X(K), BLOCK_SIZE_Y);
   dim3 norm_mm_grid(GRID_SIZE_X, GRID_SIZE_Y(N));
 
-  dim3 out_mm_block(BLOCK_SIZE_X(QUANT_GROUP_SIZE), BLOCK_SIZE_Y);
-  dim3 out_mm_grid(GRID_SIZE_X, GRID_SIZE_Y(N));
+  // dim3 out_mm_block(BLOCK_SIZE_X(QUANT_GROUP_SIZE), BLOCK_SIZE_Y);
+  // dim3 out_mm_grid(GRID_SIZE_X, GRID_SIZE_Y(N));
+  sm_size = K * sizeof(char) + WARP_X_NUM(K) * WARP_Y_NUM * sizeof(float);
+  sm_offset = K * sizeof(char);
 
   for (int m = 0; m < M; m++) {
     const int cM = 1;
@@ -326,23 +334,20 @@ void gemv_acim_with_scale_v1(const char *A, const char *B, float *C, const int M
     //        mm_grid.y);
 
     // normal region
-    sm_size = (K - QUANT_GROUP_SIZE) * sizeof(char) +
-              WARP_X_NUM((K - QUANT_GROUP_SIZE)) * WARP_Y_NUM * sizeof(float);
-    sm_offset = (K - QUANT_GROUP_SIZE) * sizeof(char);
 
-    gemv_acim_with_scale_kernel_v1<4, 4><<<norm_mm_grid, norm_mm_block, sm_size, stream>>>(
-        A_gpu, B_gpu, C_gpu, cM, N, (K - QUANT_GROUP_SIZE), in_scale_gpu, weight_scale_gpu, quant,
-        sm_offset);
+    gemv_acim_with_scale_kernel_v1<8, 8><<<norm_mm_grid, norm_mm_block, sm_size, stream>>>(
+        A_gpu, B_gpu, C_gpu, cM, N, K, in_scale_gpu, weight_scale_gpu, quant, sm_offset);
 
-    // outlier region
-    sm_size =
-        QUANT_GROUP_SIZE * sizeof(char) + WARP_X_NUM(QUANT_GROUP_SIZE) * WARP_Y_NUM * sizeof(float);
-    sm_offset = QUANT_GROUP_SIZE * sizeof(char);
+    // // outlier region
+    // sm_size =
+    //     QUANT_GROUP_SIZE * sizeof(char) + WARP_X_NUM(QUANT_GROUP_SIZE) * WARP_Y_NUM *
+    //     sizeof(float);
+    // sm_offset = QUANT_GROUP_SIZE * sizeof(char);
 
-    gemv_acim_with_scale_kernel_v1<8, 8><<<out_mm_grid, out_mm_block, sm_size, stream>>>(
-        &A_gpu[K - QUANT_GROUP_SIZE], B_out_gpu, C_gpu, cM, N, QUANT_GROUP_SIZE,
-        &in_scale_gpu[(K - QUANT_GROUP_SIZE) / QUANT_GROUP_SIZE], weight_scale_out_gpu, quant,
-        sm_offset);
+    // gemv_acim_with_scale_kernel_v1<8, 8><<<out_mm_grid, out_mm_block, sm_size, stream>>>(
+    //     &A_gpu[K - QUANT_GROUP_SIZE], B_out_gpu, C_gpu, cM, N, QUANT_GROUP_SIZE,
+    //     &in_scale_gpu[(K - QUANT_GROUP_SIZE) / QUANT_GROUP_SIZE], weight_scale_out_gpu, quant,
+    //     sm_offset);
 
     CHECK_CUDA(cudaMemcpy(&C[m * N], C_gpu, cM * N * sizeof(float), cudaMemcpyDeviceToHost));
   }
