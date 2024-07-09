@@ -12,7 +12,7 @@
   } while (0)
 
 #define VECTOR_WIDTH 4
-#define TILE_SIZE_M 16
+#define TILE_SIZE_M 1
 #define TILE_SIZE_N 128
 #define TILE_SIZE_K 128
 #define WORK_PER_THREAD_M 1
@@ -49,8 +49,6 @@
 #define MIN(a, b) ((a) > (b)) ? (b) : (a)
 #define MAX(a, b) ((a) > (b)) ? (a) : (b)
 #define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
-#define DOWN_TO_MULTIPLE(x, y) (((x) / (y)) * (y))
-#define ROUND_DIV(x, y) (((x) + ((y) / 2)) / (y))
 #define MOD(x, y) ((x) % (y))
 #define DIV(x, y) ((x) / (y))
 
@@ -66,45 +64,25 @@ __device__ int get_bit_v2_kernel(const char in_data, const int bit_pos) {
   return temp & 0b1;
 }
 
-// __device__ int adaptive_quantize_(const int in_data, const int bitwidth) {
-//   int max_value;
-//   bool out_of_range;
-//   float fp_input;
-//   float div;
-//   int val;
-
-//   max_value = (1 << bitwidth) - 1;
-//   out_of_range = (in_data > max_value);
-//   if (out_of_range) {
-//     fp_input = (float)in_data;
-//     div = pow(2, ceil(log2(fp_input / (float)max_value)));
-//     // val = round(fp_input / div) * div;
-//     val = llrintf(fp_input / div) * div;
-//     // printf("in: %d, div: %f, val: %d\n", in_data, div, val);
-//     return val;
-//   } else {
-//     return in_data;
-//   }
-// }
-
 __device__ int adaptive_quantize_(const int in_data, const int bitwidth) {
   int max_value;
+  bool out_of_range;
+  float fp_input;
+  float div;
   int val;
 
   max_value = (1 << bitwidth) - 1;
-
-  int offset = in_data ? 0 : 1;
-  int div = CEIL_DIV(in_data, max_value) + offset;
-  div--;
-  div |= div >> 1;
-  div |= div >> 2;
-  div |= div >> 4;
-  div |= div >> 8;
-  div |= div >> 16;
-  div++;
-
-  val = ROUND_DIV(in_data, div) * div;
-  return val;
+  out_of_range = (in_data > max_value);
+  if (out_of_range) {
+    fp_input = (float)in_data;
+    div = pow(2, ceil(log2(fp_input / (float)max_value)));
+    // val = round(fp_input / div) * div;
+    val = llrintf(fp_input / div) * div;
+    // printf("in: %d, div: %f, val: %d\n", in_data, div, val);
+    return val;
+  } else {
+    return in_data;
+  }
 }
 
 __device__ int dot_acim_(const int *A, const int *B, const int K, const int input_bw,
@@ -607,7 +585,6 @@ void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M
   static cudaStream_t streams[NGPU][MAX_STREAM_NUM];
 
   static char *A_gpu[NGPU];
-
   static char *A_gpu_P[NGPU];
 
   static char *B_gpu[NGPU][MAX_STREAM_NUM];
@@ -623,14 +600,6 @@ void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M
   static float *weight_scale_gpu_T[NGPU][MAX_STREAM_NUM];
 
   static bool init = false;
-
-  static bool init_ngpu_stream[NGPU][MAX_STREAM_NUM];
-  static bool init_ngpu[NGPU];
-
-  if (!init) {
-    std::fill(&init_ngpu_stream[0][0], &init_ngpu_stream[0][0] + NGPU * MAX_STREAM_NUM, false);
-    std::fill(&init_ngpu[0], &init_ngpu[0] + NGPU, false);
-  }
 
   CHECK_CUDA(cudaGetDeviceCount(&ngpu));
   if (ngpu < NGPU) {
@@ -667,43 +636,41 @@ void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M
   for (int i = 0; i < NGPU; i++) {
     CHECK_CUDA(cudaSetDevice(i)); // target GPU i
     for (int j = 0; j < stream_num_per_gpu[i]; j++) {
-      if (!init_ngpu_stream[i][j]) {
-        CHECK_CUDA(cudaStreamCreate(&streams[i][j])); // make stream for each GPU
-      }
-      // CHECK_CUDA(cudaStreamCreate(&streams[i][j])); // make stream for each GPU
+      // if (!init) {
+      //   CHECK_CUDA(cudaStreamCreate(&streams[i][j])); // make stream for each GPU
+      // }
+      CHECK_CUDA(cudaStreamCreate(&streams[i][j])); // make stream for each GPU
     }
   }
 
   for (int i = 0; i < NGPU; i++) {
     CHECK_CUDA(cudaSetDevice(i));
     // allocate memory on each GPU
-    if (!init_ngpu[i]) {
-      CHECK_CUDA(cudaMalloc(&A_gpu[i], MKMAX * sizeof(char)));
-      CHECK_CUDA(cudaMalloc(&A_gpu_P[i], MKMAX * sizeof(char)));
-      CHECK_CUDA(cudaMalloc(&input_scale_gpu[i], (MKMAX / TILE_SIZE_K) * sizeof(float)));
-      // printf("mem alloc spot 1 at iter %d\n", i);
-    }
+    // if (!init) {
+    //   CHECK_CUDA(cudaMalloc(&A_gpu[i], MKMAX * sizeof(char)));
+    //   CHECK_CUDA(cudaMalloc(&A_gpu_P[i], MKMAX * sizeof(char)));
+    //   CHECK_CUDA(cudaMalloc(&input_scale_gpu[i], (MKMAX / TILE_SIZE_K) * sizeof(float)));
+    // }
     // CHECK_CUDA(cudaMalloc(&A_gpu[i], M * K * sizeof(char)));
     // CHECK_CUDA(cudaMalloc(&A_gpu_P[i], PADDED_M * PADDED_K * sizeof(char)));
     // CHECK_CUDA(cudaMalloc(&input_scale_gpu[i], (M * K) / TILE_SIZE_K * sizeof(float)));
-    // CHECK_CUDA(cudaMalloc(&A_gpu[i], MKMAX * sizeof(char)));
-    // CHECK_CUDA(cudaMalloc(&A_gpu_P[i], MKMAX * sizeof(char)));
-    // CHECK_CUDA(cudaMalloc(&input_scale_gpu[i], (MKMAX / TILE_SIZE_K) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&A_gpu[i], MKMAX * sizeof(char)));
+    CHECK_CUDA(cudaMalloc(&A_gpu_P[i], MKMAX * sizeof(char)));
+    CHECK_CUDA(cudaMalloc(&input_scale_gpu[i], (MKMAX / TILE_SIZE_K) * sizeof(float)));
 
     for (int j = 0; j < stream_num_per_gpu[i]; j++) {
-      if (!init_ngpu_stream[i][j]) {
-        CHECK_CUDA(cudaMalloc(&B_gpu[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
-        CHECK_CUDA(cudaMalloc(&B_gpu_T[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
-        CHECK_CUDA(cudaMalloc(&C_gpu[i][j], M_MAX * N_PER_STREAM * sizeof(float)));
-        CHECK_CUDA(cudaMalloc(&weight_scale_gpu_T[i][j],
-                              (K_MAX * N_PER_STREAM) / TILE_SIZE_K * sizeof(float)));
-        // printf("mem alloc spot 2 at iter (%d, %d)\n", i, j);
-      }
-      // CHECK_CUDA(cudaMalloc(&B_gpu[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
-      // CHECK_CUDA(cudaMalloc(&B_gpu_T[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
-      // CHECK_CUDA(cudaMalloc(&C_gpu[i][j], M_MAX * N_PER_STREAM * sizeof(float)));
-      // CHECK_CUDA(cudaMalloc(&weight_scale_gpu_T[i][j],
-      //                       (K_MAX * N_PER_STREAM) / TILE_SIZE_K * sizeof(float)));
+      // if (!init) {
+      //   CHECK_CUDA(cudaMalloc(&B_gpu[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
+      //   CHECK_CUDA(cudaMalloc(&B_gpu_T[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
+      //   CHECK_CUDA(cudaMalloc(&C_gpu[i][j], M_MAX * N_PER_STREAM * sizeof(float)));
+      //   CHECK_CUDA(cudaMalloc(&weight_scale_gpu_T[i][j],
+      //                         (K_MAX * N_PER_STREAM) / TILE_SIZE_K * sizeof(float)));
+      // }
+      CHECK_CUDA(cudaMalloc(&B_gpu[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
+      CHECK_CUDA(cudaMalloc(&B_gpu_T[i][j], K_MAX * N_PER_STREAM * sizeof(char)));
+      CHECK_CUDA(cudaMalloc(&C_gpu[i][j], M_MAX * N_PER_STREAM * sizeof(float)));
+      CHECK_CUDA(cudaMalloc(&weight_scale_gpu_T[i][j],
+                            (K_MAX * N_PER_STREAM) / TILE_SIZE_K * sizeof(float)));
       // CHECK_CUDA(cudaMalloc(&B_gpu[i][j], K * N_PER_STREAM * sizeof(char)));
       // CHECK_CUDA(cudaMalloc(&B_gpu_T[i][j], K * N_PER_STREAM * sizeof(char)));
       // CHECK_CUDA(cudaMalloc(&C_gpu[i][j], M * N_PER_STREAM * sizeof(float)));
@@ -712,23 +679,16 @@ void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M
       //     sizeof(float)));
     }
 
-    if (!init_ngpu[i]) {
-      CHECK_CUDA(cudaMalloc(&B_gpu_P[i], K_MAX * N_PER_STREAM * sizeof(char)));
-      CHECK_CUDA(cudaMalloc(&C_gpu_P[i], M_MAX * N_PER_STREAM * sizeof(float)));
-      // CHECK_CUDA(cudaMalloc(&B_gpu_P[i], PADDED_K * N_PER_STREAM * sizeof(char)));
-      // CHECK_CUDA(cudaMalloc(&C_gpu_P[i], PADDED_M * N_PER_STREAM * sizeof(float)));
-      // printf("mem alloc spot 3 at iter %d\n", i);
-    }
-    // CHECK_CUDA(cudaMalloc(&B_gpu_P[i], K_MAX * N_PER_STREAM * sizeof(char)));
-    // CHECK_CUDA(cudaMalloc(&C_gpu_P[i], M_MAX * N_PER_STREAM * sizeof(float)));
+    // if (!init) {
+    //   CHECK_CUDA(cudaMalloc(&B_gpu_P[i], K_MAX * N_PER_STREAM * sizeof(char)));
+    //   CHECK_CUDA(cudaMalloc(&C_gpu_P[i], M_MAX * N_PER_STREAM * sizeof(float)));
+    //   // CHECK_CUDA(cudaMalloc(&B_gpu_P[i], PADDED_K * N_PER_STREAM * sizeof(char)));
+    //   // CHECK_CUDA(cudaMalloc(&C_gpu_P[i], PADDED_M * N_PER_STREAM * sizeof(float)));
+    // }
+    CHECK_CUDA(cudaMalloc(&B_gpu_P[i], K_MAX * N_PER_STREAM * sizeof(char)));
+    CHECK_CUDA(cudaMalloc(&C_gpu_P[i], M_MAX * N_PER_STREAM * sizeof(float)));
   }
 
-  for (int i = 0; i < NGPU; i++) {
-    init_ngpu[i] = true;
-    for (int j = 0; j < stream_num_per_gpu[i]; j++) {
-      init_ngpu_stream[i][j] = true;
-    }
-  }
   init = true;
 
   // compute gemm
@@ -783,8 +743,6 @@ void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M
       cudaMemcpyAsync(
           weight_scale_gpu_T[i][j], &weight_scale[(Nbegin[i] + n_offset_start) * (K / TILE_SIZE_K)],
           eff_n_size * (K / TILE_SIZE_K) * sizeof(float), cudaMemcpyHostToDevice, streams[i][j]);
-      // cudaMemcpyAsync(weight_scale_gpu_T[i][j], weight_scale, 1, cudaMemcpyHostToDevice,
-      //                 streams[i][j]);
 
       transpose<char>
           <<<transpose_B_global, transpose_local>>>(eff_n_size, K, B_gpu_T[i][j], B_gpu[i][j]);
@@ -813,22 +771,22 @@ void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M
     cudaStreamSynchronize(streams[i][stream_num_per_gpu[i] - 1]);
   }
 
-  // for (int i = 0; i < NGPU; i++) {
-  //   CHECK_CUDA(cudaSetDevice(i));
-  //   CHECK_CUDA(cudaFree(A_gpu[i]));
-  //   CHECK_CUDA(cudaFree(A_gpu_P[i]));
-  //   CHECK_CUDA(cudaFree(B_gpu_P[i]));
-  //   CHECK_CUDA(cudaFree(C_gpu_P[i]));
-  //   CHECK_CUDA(cudaFree(input_scale_gpu[i]));
-  //   for (int j = 0; j < stream_num_per_gpu[i]; j++) {
-  //     CHECK_CUDA(cudaStreamDestroy(streams[i][j]));
-  //     CHECK_CUDA(cudaFree(B_gpu[i][j]));
-  //     CHECK_CUDA(cudaFree(B_gpu_T[i][j]));
-  //     CHECK_CUDA(cudaFree(C_gpu[i][j]));
-  //     // CHECK_CUDA(cudaFree(weight_scale_gpu[i][j]));
-  //     CHECK_CUDA(cudaFree(weight_scale_gpu_T[i][j]));
-  //   }
-  // }
+  for (int i = 0; i < NGPU; i++) {
+    CHECK_CUDA(cudaSetDevice(i));
+    CHECK_CUDA(cudaFree(A_gpu[i]));
+    CHECK_CUDA(cudaFree(A_gpu_P[i]));
+    CHECK_CUDA(cudaFree(B_gpu_P[i]));
+    CHECK_CUDA(cudaFree(C_gpu_P[i]));
+    CHECK_CUDA(cudaFree(input_scale_gpu[i]));
+    for (int j = 0; j < stream_num_per_gpu[i]; j++) {
+      CHECK_CUDA(cudaStreamDestroy(streams[i][j]));
+      CHECK_CUDA(cudaFree(B_gpu[i][j]));
+      CHECK_CUDA(cudaFree(B_gpu_T[i][j]));
+      CHECK_CUDA(cudaFree(C_gpu[i][j]));
+      // CHECK_CUDA(cudaFree(weight_scale_gpu[i][j]));
+      CHECK_CUDA(cudaFree(weight_scale_gpu_T[i][j]));
+    }
+  }
 
   // end = std::chrono::high_resolution_clock::now();
   // latency_map["matmul"] += std::chrono::duration<double, std::milli>(end - start).count();

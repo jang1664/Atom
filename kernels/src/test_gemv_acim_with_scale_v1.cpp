@@ -9,8 +9,8 @@ void gemv_acim_with_scale_v1(const char *A, const char *B, float *C, const int M
                              const int input_bw, const int weight_bw, const bool quant);
 
 int main(void) {
-  int M = 1;
-  int N = 4096;
+  int M = 32;
+  int N = 11008;
   int K = 4096;
   int input_bw = 4;
   int weight_bw = 4;
@@ -62,7 +62,7 @@ int main(void) {
   }
 
   // warm up
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 3; i++) {
     gemv_acim_with_scale_v1(A, B, C, M, N, K, in_scale, wt_scale, input_bw, weight_bw, quant);
   }
 
@@ -72,14 +72,20 @@ int main(void) {
   }
 
   auto start = std::chrono::high_resolution_clock::now();
-  gemv_acim_with_scale_v1(A, B, C, M, N, K, in_scale, wt_scale, input_bw, weight_bw, quant);
+  for (int i = 0; i < 10; i++) {
+    gemv_acim_with_scale_v1(A, B, C, M, N, K, in_scale, wt_scale, input_bw, weight_bw, quant);
+  }
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  duration = duration / 10;
 
   bool match = true;
+  float threshold = quant ? 1e-1 : 1e-3;
+  int err_cnt = 0;
   for (int i = 0; i < M * N; i++) {
-    if (std::abs(C[i] - C_ref[i]) > 1e-1) {
-      std::cout << "Mismatch at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
+    if ((std::abs(C[i] - C_ref[i]) / std::abs(C_ref[i]) + 1e-20) > threshold) {
+      // std::cout << "Mismatch at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
+      err_cnt++;
       match = false;
     } else {
       // std::cout << "Match at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
@@ -89,11 +95,13 @@ int main(void) {
   if (match) {
     std::cout << "Results match" << std::endl;
   } else {
-    std::cout << "Results do not match" << std::endl;
+    std::cout << "Results do not match. " << err_cnt << "/" << M * N << std::endl;
   }
 
   float ops = 2.0 * M * N * K;
-  float gflops = (ops / duration.count()) / (1000.0 * 1000.0);
+  float gflops = (ops / duration.count()) / (1000.0);
+  float seconds = duration.count() / 1000000.0;
   std::cout << "GFLOPS: " << std::scientific << gflops << std::endl;
+  std::cout << "latency : " << seconds << " seconds" << std::endl;
   return 0;
 }

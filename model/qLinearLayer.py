@@ -35,8 +35,8 @@ class QLinearLayer(nn.Module):
         
     @torch.no_grad()
     def forward(self, x, x_int, x_scale):
-        # print(x.dtype) 
-        # print(self.weight.dtype)
+        # print(x.shape) 
+        # print(self.weight.shape)
         y = torch.functional.F.linear(x, self.weight, self.bias)
         return y
     
@@ -260,17 +260,23 @@ class QLinearLayerACIM(nn.Module):
         # err_cnt = torch.sum(torch.abs(self.weight - w_dequant) > 1e-5)
         # if err_cnt > 0:
         #   print(f"{self.name} WEIGHT Error count : {err_cnt}")
-        print(f"{self.name} Run")
+        # print(f"{self.name} Run")
+        # print(f"input shape : {x.shape}")
+        # print(f"weight shape : {self.weight.shape}")
+        # print(x_int.dtype)
+        # print(x_scale.dtype)
+        # print(self.weight_int.dtype)
+        # print(self.weight_scale.dtype)
         out_shape = [x.shape[0], x.shape[1], self.weight.shape[0]]
         output = torch.zeros(out_shape, device=x.device, dtype=torch.float32)
 
         for i in range(x_int.shape[0]):
           output[i, :, :] = gemm_acim.forward(
-              x_int[i, :, :].to(torch.int32),
-              self.weight_int.to(torch.int32),
-              x_scale[i, :, :].to(torch.float32),
-              self.weight_scale.to(torch.float32),
-              4, 4, False).reshape([x.shape[1], self.weight.shape[0]])
+              x_int[i, :, :].to(torch.uint8).to(x.device),
+              self.weight_int.to(torch.uint8).to(x.device),
+              x_scale[i, :, :].to(torch.float32).to(x.device),
+              self.weight_scale.to(torch.float32).to(x.device),
+              4, 4, True).reshape([x.shape[1], self.weight.shape[0]])
 
         return output.to(torch.float16)
     

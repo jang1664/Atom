@@ -5,12 +5,12 @@
 #include <random>
 
 int main(void) {
-  int M = 1;
-  int N = 4096;
+  int M = 32;
+  int N = 11008;
   int K = 4096;
   int input_bw = 4;
   int weight_bw = 4;
-  bool quant = false;
+  bool quant = true;
   char *A = new char[M * K];
   char *B = new char[K * N];
   float *C = new float[M * N];
@@ -72,8 +72,9 @@ int main(void) {
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   bool match = true;
+  float threshold = quant ? 1e-1 : 1e-3;
   for (int i = 0; i < M * N; i++) {
-    if (std::abs(C[i] - C_ref[i]) > 1e-1) {
+    if ((std::abs(C[i] - C_ref[i]) / std::abs(C_ref[i]) + 1e-20) > threshold) {
       std::cout << "Mismatch at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
       match = false;
     } else {
@@ -88,7 +89,9 @@ int main(void) {
   }
 
   float ops = 2.0 * M * N * K;
-  float gflops = (ops / duration.count()) / (1000.0 * 1000.0);
+  float gflops = (ops / duration.count()) / (1000.0);
+  float seconds = duration.count() / 1000000.0;
   std::cout << "GFLOPS: " << std::scientific << gflops << std::endl;
+  std::cout << "Time: " << seconds << " seconds" << std::endl;
   return 0;
 }

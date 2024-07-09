@@ -30,17 +30,28 @@ torch.set_printoptions(precision=10)
 DEV = torch.device('cuda')
 model = torch.load("./saved/llama2-7b_quantized.pth", map_location=torch.device('cpu'))
 # model = model.to(DEV)
-print(model)
 
-hooks = []
-shapes = []
-def stat_input_hook(module, input, output):
-  shapes.append((tuple(input[0].shape), tuple(module.weight.shape)))
+changed_layers = {}
 for name, m in model.model.named_modules():
     if isinstance(m, qLinearLayer.QLinearLayer):
-        hooks.append(
-            m.register_forward_hook(stat_input_hook) #- hook the function with name fixed
-        )
+      layer_v2 = qLinearLayer.QLinearLayerACIM()
+      layer_v2.construct(m.to(torch.device('cpu')))
+      layer_v2.name = name
+      # layer_v2.args = m.args
+      # layer_v2.weight = m.weight
+      # layer_v2.bias = m.bias
+      del m
+      changed_layers[name] = layer_v2
+
+for name, layer in changed_layers.items():
+  analyze.set_nested_attr(model.model, name, layer)
+
+# for name, layer in changed_layers.items():
+#     if "layers.31" in name:
+#       analyze.set_nested_attr(model.model, name, layer)
+#       break
+
+print(model)
 
 parser = argparse.ArgumentParser()
 
@@ -246,9 +257,3 @@ for task_name in tasks_str.split(','):
         print(f"INFO {task_name} : {results_dict[task_name]['acc_norm']*100:.2f}")
     else:
         print(f"INFO {task_name} : {results_dict[task_name]['acc']*100:.2f}")
-
-for hook in hooks:
-    hook.remove()
-
-shapes = list(set(shapes))
-print(shapes)

@@ -73,10 +73,11 @@
 #define MKMAX (4096 * 4)
 #define KNMAX (4096 * 4096 * 4)
 #define MNMAX (4096 * 4)
+#define KN_OUT_MAX (128 * 4096 * 4)
 
-#define TN 8
-#define WK 256
-#define WN 8
+#define TN 16
+#define WK 512
+#define WN 16
 #define BLOCK_SIZE_X(K) ((K / WK) * 32)
 #define BLOCK_SIZE_Y (TN / WN)
 #define GRID_SIZE_X 1
@@ -88,10 +89,15 @@
 #define QUANT_GROUP_SIZE 128
 #define IN_NOM_BW 4
 #define WG_NOM_BW 4
-#define IN_MAX_BW 8
-#define WG_MAX_BW 8
+// #define IN_MAX_BW 8
+// #define WG_MAX_BW 8
+#define IN_MAX_BW 4
+#define WG_MAX_BW 4
 #define NOM_BW 4
-#define MAX_BW 8
+// #define MAX_BW 8
+#define MAX_BW 4
 #define ADC_BITWIDTH 4
 
 #define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
+#define DOWN_TO_MULTIPLE(x, y) (((x) / (y)) * (y))
+#define ROUND_DIV(x, y) (((x) + ((y) / 2)) / (y))

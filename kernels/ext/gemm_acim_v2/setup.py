@@ -4,10 +4,14 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 setup(
     name='gemm_acim',
     ext_modules=[
-        CUDAExtension('gemm_acim', [
+        CUDAExtension(
+            name='gemm_acim', 
+            sources=[
             'gemm_acim_wrap.cpp',
-            '../src/GEMM/gemm_acim.cu',
-        ])
+            '../../src/GEMM/gemm_acim.cu'],
+            extra_compile_args={'cxx': ['-O3'],
+            'nvcc': ["-O3"]}
+        )
     ],
     cmdclass={
         'build_ext': BuildExtension
