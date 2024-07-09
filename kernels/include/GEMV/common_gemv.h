@@ -60,24 +60,15 @@
   } while (0)
 
 #define WARP_SIZE 32
-#define WARPS_PER_BLOCK 4
-#define THREADS_PER_BLOCK 128 // WARP_SIZE * WARPS_PER_BLOCK
 
-#define COLS_PER_WARP 8
-#define COLS_PER_BLOCK 32   // COLS_PER_WARP * WARPS_PER_BLOCK
-#define THREADS_PER_GROUP 4 // WARP_SIZE / COLS_PER_WARP
+#define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
+#define DOWN_TO_MULTIPLE(x, y) (((x) / (y)) * (y))
+#define UP_TO_MULTIPLE(x, y) (((x + (y) - 1) / (y)) * (y))
+#define ROUND_DIV(x, y) (((x) + ((y) / 2)) / (y))
 
-#define KMAX (4096 * 4)
-#define NMAX (4096 * 4)
-#define MMAX 1
-#define MKMAX (4096 * 4)
-#define KNMAX (4096 * 4096 * 4)
-#define MNMAX (4096 * 4)
-#define KN_OUT_MAX (128 * 4096 * 4)
-
-#define TN 16
-#define WK 512
-#define WN 16
+#define TN 128
+#define WK 1024
+#define WN 128
 #define BLOCK_SIZE_X(K) ((K / WK) * 32)
 #define BLOCK_SIZE_Y (TN / WN)
 #define GRID_SIZE_X 1
@@ -98,6 +89,29 @@
 #define MAX_BW 4
 #define ADC_BITWIDTH 4
 
-#define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
-#define DOWN_TO_MULTIPLE(x, y) (((x) / (y)) * (y))
-#define ROUND_DIV(x, y) (((x) + ((y) / 2)) / (y))
+#define KMAX (4096 * 4)
+#define NMAX (4096 * 4)
+#define MMAX 50
+#define MKMAX (50 * 4096 * 4)
+#define KNMAX (4096 * 4096 * 4)
+#define MNMAX (50 * 4096 * 4)
+
+#define KPMAX UP_TO_MULTIPLE(KMAX, WK)
+#define MKPMAX UP_TO_MULTIPLE(MKMAX, WK)
+#define KNPMAX UP_TO_MULTIPLE(KNMAX, WK)
+
+#define TRANSPOSE_NUM_LOCAL_THREAD_ROW 16
+#define TRANSPOSE_NUM_LOCAL_THREAD_COL 16
+#define PADDING_NUM_LOCAL_THREAD_ROW 16
+#define PADDING_NUM_LOCAL_THREAD_COL 16
+
+#define ASSERT(x)                                                                                  \
+  if (!(x)) {                                                                                      \
+    printf("assert failed at %s:%d\n", __FILE__, __LINE__);                                        \
+    exit(1);                                                                                       \
+  }
+
+#define WARNING(x)                                                                                 \
+  if (!(x)) {                                                                                      \
+    printf("warning at %s:%d\n", __FILE__, __LINE__);                                              \
+  }

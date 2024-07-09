@@ -9,12 +9,12 @@ void gemv_acim_with_scale_v1(const char *A, const char *B, float *C, const int M
                              const int input_bw, const int weight_bw, const bool quant);
 
 int main(void) {
-  int M = 32;
+  int M = 45;
   int N = 11008;
   int K = 4096;
   int input_bw = 4;
   int weight_bw = 4;
-  bool quant = false;
+  bool quant = true;
   char *A = new char[M * K];
   char *B = new char[K * N];
   float *C = new float[M * N];
@@ -27,22 +27,24 @@ int main(void) {
   std::normal_distribution<float> distribution_f(1.0, 0.1);
 
   for (int i = 0; i < M * K; i++) {
-    // A[i] = distribution(generator);
-    A[i] = 1;
+    A[i] = distribution(generator);
+    // A[i] = (i - (M * K / 2)) % 8;
   }
+
   for (int i = 0; i < K * N; i++) {
-    // B[i] = distribution(generator);
-    B[i] = 1;
+    B[i] = distribution(generator);
+    // B[i] = (i - (K * N / 2)) % 8;
+    // B[i] = -(i % 3);
   }
 
   for (int i = 0; i < (M * K) / 128; i++) {
-    // in_scale[i] = distribution_f(generator);
-    in_scale[i] = 1.0;
+    in_scale[i] = distribution_f(generator);
+    // in_scale[i] = 1.0;
   }
 
   for (int i = 0; i < (K * N) / 128; i++) {
-    // wt_scale[i] = distribution_f(generator);
-    wt_scale[i] = 1.0;
+    wt_scale[i] = distribution_f(generator);
+    // wt_scale[i] = 1.0;
   }
   // wt_scale[0] = 0.0;
   // wt_scale[K] = 0.0;
@@ -68,16 +70,17 @@ int main(void) {
 
   // start test
   for (int i = 0; i < M * N; i++) {
-    C[i] = 0;
+    C[i] = i;
   }
 
+  int iteration = 3;
   auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < iteration; i++) {
     gemv_acim_with_scale_v1(A, B, C, M, N, K, in_scale, wt_scale, input_bw, weight_bw, quant);
   }
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  duration = duration / 10;
+  duration = duration / iteration;
 
   bool match = true;
   float threshold = quant ? 1e-1 : 1e-3;

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from quant import fake_quantize_quarter_E5M2, fake_quantize_quarter_E4M3, quantize_tensor, quantize_tensor_channel_group
 import gemm_acim
+import gemv_acim_v1
 
 def find_qlinear_layers(module, name=''):
     if type(module) == QLinearLayer:
@@ -277,6 +278,13 @@ class QLinearLayerACIM(nn.Module):
               x_scale[i, :, :].to(torch.float32).to(x.device),
               self.weight_scale.to(torch.float32).to(x.device),
               4, 4, True).reshape([x.shape[1], self.weight.shape[0]])
+
+          # output[i, :, :] = gemv_acim_v1.forward(
+          #     x_int[i, :, :].to(torch.uint8).to(x.device),
+          #     self.weight_int.to(torch.uint8).to(x.device),
+          #     x_scale[i, :, :].to(torch.float32).to(x.device),
+          #     self.weight_scale.to(torch.float32).to(x.device),
+          #     4, 4, True).reshape([x.shape[1], self.weight.shape[0]])
 
         return output.to(torch.float16)
     

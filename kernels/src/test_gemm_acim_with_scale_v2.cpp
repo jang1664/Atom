@@ -5,7 +5,7 @@
 #include <random>
 
 int main(void) {
-  int M = 32;
+  int M = 45;
   int N = 11008;
   int K = 4096;
   int input_bw = 4;
@@ -23,22 +23,22 @@ int main(void) {
   std::normal_distribution<float> distribution_f(1.0, 0.1);
 
   for (int i = 0; i < M * K; i++) {
-    // A[i] = distribution(generator);
-    A[i] = 1;
+    A[i] = distribution(generator);
+    // A[i] = 1;
   }
   for (int i = 0; i < K * N; i++) {
-    // B[i] = distribution(generator);
-    B[i] = 1;
+    B[i] = distribution(generator);
+    // B[i] = 1;
   }
 
   for (int i = 0; i < (M * K) / 128; i++) {
-    // in_scale[i] = distribution_f(generator);
-    in_scale[i] = 1.0;
+    in_scale[i] = distribution_f(generator);
+    // in_scale[i] = 1.0;
   }
 
   for (int i = 0; i < (K * N) / 128; i++) {
-    // wt_scale[i] = distribution_f(generator);
-    wt_scale[i] = 1.0;
+    wt_scale[i] = distribution_f(generator);
+    // wt_scale[i] = 1.0;
   }
   // wt_scale[0] = 0.0;
   // wt_scale[K] = 0.0;
@@ -73,10 +73,12 @@ int main(void) {
 
   bool match = true;
   float threshold = quant ? 1e-1 : 1e-3;
+  int err_cnt = 0;
   for (int i = 0; i < M * N; i++) {
     if ((std::abs(C[i] - C_ref[i]) / std::abs(C_ref[i]) + 1e-20) > threshold) {
-      std::cout << "Mismatch at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
+      // std::cout << "Mismatch at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
       match = false;
+      err_cnt++;
     } else {
       // std::cout << "Match at " << i << " " << C[i] << " " << C_ref[i] << std::endl;
     }
@@ -85,7 +87,7 @@ int main(void) {
   if (match) {
     std::cout << "Results match" << std::endl;
   } else {
-    std::cout << "Results do not match" << std::endl;
+    std::cout << "Results do not match. " << err_cnt << "/" << (M * N) << std::endl;
   }
 
   float ops = 2.0 * M * N * K;

@@ -11,6 +11,8 @@ setup(
             '../../src/GEMV/gemv_acim_with_scale_v1.cu'],
             extra_compile_args={'cxx': ['-O3', '-I', '../../include'],
             'nvcc': ["-O3", '-I', '../../include']}
+            # extra_compile_args={'cxx': ['-O3', '-I', '../../include', "-D", "DEBUG"],
+            # 'nvcc': ["-O3", '-I', '../../include', "-D", "DEBUG"]}
         )
     ],
     cmdclass={
