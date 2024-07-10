@@ -2,13 +2,13 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
-    name='gemm_acim_v2',
+    name='gemm_acim_v3',
     ext_modules=[
         CUDAExtension(
-            name='gemm_acim_v2', 
+            name='gemm_acim_v3', 
             sources=[
             'gemm_acim_wrap.cpp',
-            '../../src/GEMM/gemm_acim_v2.cu'],
+            '../../src/GEMM/gemm_acim_v3.cu'],
             extra_compile_args={'cxx': ['-O3', '-I', '../../include'],
             'nvcc': ["-O3", '-I', '../../include']}
             # extra_compile_args={'cxx': ['-O3', '-I', '../../include', "-D", "DEBUG"],

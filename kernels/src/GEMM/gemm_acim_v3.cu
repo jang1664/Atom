@@ -153,7 +153,12 @@ __global__ void cuda_gemm_acim_v3(const char *__restrict__ A, const char *__rest
     // sync before loading next tiles
     __syncthreads();
 
-    bool is_outlier_region = ((k + QUANT_GROUP_SIZE) > K);
+    bool is_outlier_region = ((k + QUANT_GROUP_SIZE) >= K);
+#ifdef DEBUG
+    if (DEBUG_COND) {
+      printf("k : %d, is_outlier_region : %d\n", k, is_outlier_region);
+    }
+#endif
 
     // load the next tile of A and B
     int curr_buffer_id = reduce_iter % BUFFER_NUM;
@@ -194,10 +199,20 @@ __global__ void cuda_gemm_acim_v3(const char *__restrict__ A, const char *__rest
 
     int input_bw = (is_outlier_region) ? in_out_bw : in_norm_bw;
     int weight_bw = (is_outlier_region) ? weight_out_bw : weight_norm_bw;
+#ifdef DEBUG
+    if (DEBUG_COND) {
+      printf("input_bw : %d, weight_bw : %d\n", input_bw, weight_bw);
+    }
+#endif
 
     int accum_all_bp = 0;
     for (int ibp = 0; ibp < input_bw; ibp = ibp + IN_BP_TILE_SIZE) {
       for (int wbp = 0; wbp < weight_bw; wbp = wbp + W_BP_TILE_SIZE) {
+#ifdef DEBUG
+        if (DEBUG_COND) {
+          printf("input bit positino : %d, weight bit position : %d\n", ibp, wbp);
+        }
+#endif
 
         // clear the partial sum register
 #pragma unroll
@@ -219,17 +234,29 @@ __global__ void cuda_gemm_acim_v3(const char *__restrict__ A, const char *__rest
           int nidx_global = N_TILE_SIZE * bidz + nidx_in_tile;
 
           // parsing input bitplanes
+#ifdef DEBUG
+          if (DEBUG_COND) {
+            printf("Asub[%d][%d] : %d\n", curr_buffer_id,
+                   midx_in_tile * QUANT_GROUP_SIZE + kidx_in_tile,
+                   Asub[curr_buffer_id][midx_in_tile * QUANT_GROUP_SIZE + kidx_in_tile]);
+          }
+#endif
 #pragma unroll
           for (int i = ibp; i < (ibp + IN_BP_TILE_SIZE); i++) {
             int id = midx_in_tile * QUANT_GROUP_SIZE + kidx_in_tile;
-            in_bp[i] = get_bit_<char>(Asub[curr_buffer_id][id], i);
+            in_bp[i - ibp] = get_bit_<char>(Asub[curr_buffer_id][id], i);
+#ifdef DEBUG
+            if (DEBUG_COND) {
+              printf("in_bp[%d] : %d\n", i - ibp, Asub[curr_buffer_id][id]);
+            }
+#endif
           }
 
           // parsing weight bitplanes
 #pragma unroll
           for (int i = wbp; i < (wbp + W_BP_TILE_SIZE); i++) {
             int id = nidx_in_tile * QUANT_GROUP_SIZE + kidx_in_tile;
-            wg_bp[i] = get_bit_<char>(Bsub[curr_buffer_id][id], i);
+            wg_bp[i - wbp] = get_bit_<char>(Bsub[curr_buffer_id][id], i);
           }
 
           // compute psum with outer product
@@ -337,22 +364,25 @@ void gemm_acim_v3(const char *A, const char *B, float *C, const int M, const int
 
   static bool init = false;
 
-  const int padded_M = CEIL_DIV(M, M_TILE_SIZE) * M_TILE_SIZE;
-  const int padded_N = CEIL_DIV(N, N_TILE_SIZE) * N_TILE_SIZE;
+  const int padded_M = UP_TO_MULTIPLE(M, M_TILE_SIZE);
+  const int padded_N = UP_TO_MULTIPLE(N, N_TILE_SIZE);
 
   if (!init) {
     init = true;
 
     const int mk_max = MKMAX;
-    const int mk_pad_max = CEIL_DIV(MMAX, M_TILE_SIZE) * CEIL_DIV(KMAX, QUANT_GROUP_SIZE);
+    const int mk_pad_max =
+        UP_TO_MULTIPLE(MMAX, M_TILE_SIZE) * UP_TO_MULTIPLE(KMAX, QUANT_GROUP_SIZE);
 
     const int kn_max = KNMAX;
-    const int kn_pad_max_1 = CEIL_DIV(KNORM, QUANT_GROUP_SIZE) * CEIL_DIV(NMAX, N_TILE_SIZE);
-    const int kn_pad_max_2 = CEIL_DIV(KMAX, QUANT_GROUP_SIZE) * CEIL_DIV(NNORM, N_TILE_SIZE);
+    const int kn_pad_max_1 =
+        UP_TO_MULTIPLE(KNORM, QUANT_GROUP_SIZE) * UP_TO_MULTIPLE(NMAX, N_TILE_SIZE);
+    const int kn_pad_max_2 =
+        UP_TO_MULTIPLE(KMAX, QUANT_GROUP_SIZE) * UP_TO_MULTIPLE(NNORM, N_TILE_SIZE);
     const int kn_pad_max = (kn_pad_max_1 > kn_pad_max_2) ? kn_pad_max_1 : kn_pad_max_2;
 
     const int mn_max = MNMAX;
-    const int mn_pad_max = CEIL_DIV(MMAX, M_TILE_SIZE) * CEIL_DIV(NMAX, N_TILE_SIZE);
+    const int mn_pad_max = UP_TO_MULTIPLE(MMAX, M_TILE_SIZE) * UP_TO_MULTIPLE(NMAX, N_TILE_SIZE);
 
     CHECK_CUDA(cudaMalloc(&A_gpu, mk_max * sizeof(char)));
     CHECK_CUDA(cudaMalloc(&A_P_gpu, mk_pad_max * sizeof(char)));
@@ -387,14 +417,17 @@ void gemm_acim_v3(const char *A, const char *B, float *C, const int M, const int
   // pad M
   if (padded_M != M) {
     // padding A
+#ifdef DEBUG
+    fprintf(stderr, "padded_N: %d\n", padded_N);
+#endif
     dim3 pad_grid_1(CEIL_DIV(K, PADDING_NUM_LOCAL_THREAD_COL),
                     CEIL_DIV(padded_M, PADDING_NUM_LOCAL_THREAD_ROW));
-    paddingAddZeroes<char><<<pad_grid_1, pad_block>>>(M, K, A_gpu, padded_M, K, A_P_gpu);
+    paddingAddZeroes<char><<<pad_grid_1, pad_block, 0, stream>>>(M, K, A_gpu, padded_M, K, A_P_gpu);
 
     // padding in scale
     dim3 pad_grid_2(CEIL_DIV(K / QUANT_GROUP_SIZE, PADDING_NUM_LOCAL_THREAD_COL),
                     CEIL_DIV(padded_M, PADDING_NUM_LOCAL_THREAD_ROW));
-    paddingAddZeroes<float><<<pad_grid_2, pad_block>>>(
+    paddingAddZeroes<float><<<pad_grid_2, pad_block, 0, stream>>>(
         M, K / QUANT_GROUP_SIZE, in_scale_gpu, padded_M, K / QUANT_GROUP_SIZE, in_scale_P_gpu);
 
   } else {
@@ -406,15 +439,18 @@ void gemm_acim_v3(const char *A, const char *B, float *C, const int M, const int
   if (padded_N != N) {
     // padding B
     dim3 pad_grid_3(CEIL_DIV(K, PADDING_NUM_LOCAL_THREAD_COL),
-                    CEIL_DIV(N, PADDING_NUM_LOCAL_THREAD_ROW));
-    paddingAddZeroes<char><<<pad_grid_3, pad_block>>>(N, K, B_gpu, padded_N, K, B_P_gpu);
+                    CEIL_DIV(padded_N, PADDING_NUM_LOCAL_THREAD_ROW));
+#ifdef DEBUG
+    fprintf(stderr, "padded_N: %d\n", padded_N);
+#endif
+    paddingAddZeroes<char><<<pad_grid_3, pad_block, 0, stream>>>(N, K, B_gpu, padded_N, K, B_P_gpu);
 
     // padding weight scale
     dim3 pad_grid_4(CEIL_DIV(K / QUANT_GROUP_SIZE, PADDING_NUM_LOCAL_THREAD_COL),
-                    CEIL_DIV(N, PADDING_NUM_LOCAL_THREAD_ROW));
-    paddingAddZeroes<float><<<pad_grid_4, pad_block>>>(N, K / QUANT_GROUP_SIZE, weight_scale_gpu,
-                                                       padded_N, K / QUANT_GROUP_SIZE,
-                                                       weight_scale_P_gpu);
+                    CEIL_DIV(padded_N, PADDING_NUM_LOCAL_THREAD_ROW));
+    paddingAddZeroes<float>
+        <<<pad_grid_4, pad_block, 0, stream>>>(N, K / QUANT_GROUP_SIZE, weight_scale_gpu, padded_N,
+                                               K / QUANT_GROUP_SIZE, weight_scale_P_gpu);
 
   } else {
     B_P_gpu = B_gpu;
@@ -423,6 +459,11 @@ void gemm_acim_v3(const char *A, const char *B, float *C, const int M, const int
 
   dim3 mm_block(BLOCKDIMX, BLOCKDIMY(M, M_TILE_SIZE), BLOCKDIMZ(N, N_TILE_SIZE));
   dim3 mm_grid(GRIDDIMX, GRIDDIMY(M, M_TILE_SIZE), GRIDDIMZ(N, N_TILE_SIZE));
+
+#ifdef DEBUG
+  printf("blockdim.x : %d, blockdim.y : %d, blockdim.z : %d\n", mm_block.x, mm_block.y, mm_block.z);
+  printf("griddim.x : %d, griddim.y : %d, griddim.z : %d\n", mm_grid.x, mm_grid.y, mm_grid.z);
+#endif
 
   if (IN_BP_TILE_SIZE == 4 && W_BP_TILE_SIZE == 4 && M_TILE_SIZE == 4 && N_TILE_SIZE == 4 &&
       QUANT_GROUP_SIZE == 128) {
@@ -435,7 +476,8 @@ void gemm_acim_v3(const char *A, const char *B, float *C, const int M, const int
     // remove padding C
     dim3 remove_pad_grid(CEIL_DIV(N, PADDING_NUM_LOCAL_THREAD_COL),
                          CEIL_DIV(M, PADDING_NUM_LOCAL_THREAD_ROW));
-    paddingRemoveZeroes<float><<<remove_pad_grid, pad_block>>>(padded_M, K, C_P_gpu, M, K, C_gpu);
+    paddingRemoveZeroes<float>
+        <<<remove_pad_grid, pad_block, 0, stream>>>(padded_M, padded_N, C_P_gpu, M, N, C_gpu);
   } else {
     C_gpu = C_P_gpu;
   }

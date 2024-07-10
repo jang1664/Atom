@@ -26,14 +26,16 @@ int main(void) {
       {2, 4096, 11008}, {2, 11008, 4096}, {4, 4096, 4096},   {4, 4096, 11008},
       {4, 11008, 4096}, {45, 4096, 4096}, {45, 4096, 11008}, {45, 11008, 4096}};
 
+  // std::vector<std::array<int, 3>> workloads = {{1, 128, 128}};
+
   // parameters
   int norm_input_bw = 4;
   int norm_weight_bw = 4;
 
-  int out_input_bw = 4;
-  int out_weight_bw = 4;
+  int out_input_bw = 8;
+  int out_weight_bw = 8;
 
-  bool quant = true;
+  bool quant = false;
 
   // test parameters
   const bool validation = true;

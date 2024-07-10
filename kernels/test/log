@@ -1,0 +1,3 @@
+RUN TEST
+M: 1, K: 128, N: 128
+Results match

@@ -6,9 +6,12 @@ typedef void (*gemm_acim_fp)(const char *A, const char *B, float *C, const int M
                              const int input_norm_bw, const int weight_norm_bw,
                              const int input_out_bw, const int weight_out_bw, const bool quant);
 
-void random_A(char *A, int M, int K);
-void random_B(char *B, int K, int N);
-void random_C(float *C, int M, int N);
+void random_A(char *A, int M, int K, bool random = true);
+void random_B(char *B, int K, int N, bool random = true);
+void random_C(float *C, int M, int N, bool random = true);
+void random_in_scale(float *C, int M, int K, bool random = true);
+void random_weight_scale(float *C, int K, int N, bool random = true);
+
 void clear_C(float *C, int M, int N);
 void cal_ref_value(char *A, char *B, float *C_ref, int M, int N, int K, float *in_scale,
                    float *wt_scale);
@@ -19,8 +22,6 @@ void run_test(gemm_acim_fp func, char *A, char *B, float *C, int M, int N, int K
               float *wt_scale, int norm_input_bw, int norm_weight_bw, int out_input_bw,
               int out_weight_bw, bool quant, int test_iter, bool validation, float *C_ref,
               FILE *out_file);
-void random_in_scale(float *C, int M, int K);
-void random_weight_scale(float *C, int K, int N);
 void allocate_array(char **A, char **B, float **C, float **C_ref, float **in_scale,
                     float **wt_scale);
 

@@ -2,11 +2,14 @@ CC=/usr/bin/g++
 CXX=/usr/bin/g++
 CUX=/usr/local/cuda/bin/nvcc
 
-# CFLAGS=-std=c++17 -O3 -Wall -I/usr/local/cuda/include -Iinclude -g
-# CUDA_CFLAGS:=$(foreach option, $(CFLAGS), -Xcompiler=$(option)) -lineinfo -g -G -DDEBUG
+# CFLAGS=-std=c++17 -O3 -Wall -I/usr/local/cuda/include -I../include -g
+# CUDA_CFLAGS:=$(foreach option, $(CFLAGS), -Xcompiler=$(option)) -lineinfo -g -G -DDEBUG -Xptxas=-v
+
+# CFLAGS=-std=c++17 -O3 -Wall -I/usr/local/cuda/include -I../include -DDEBUG
+# CUDA_CFLAGS:=$(foreach option, $(CFLAGS), -Xcompiler=$(option)) -O3 -lineinfo -Xptxas=-v -DDEBUG
 
 CFLAGS=-std=c++17 -O3 -Wall -I/usr/local/cuda/include -I../include
-CUDA_CFLAGS:=$(foreach option, $(CFLAGS), -Xcompiler=$(option)) -O3 -lineinfo 
+CUDA_CFLAGS:=$(foreach option, $(CFLAGS), -Xcompiler=$(option)) -O3 -lineinfo -Xptxas=-v
 
 LDFLAGS=-pthread -L/usr/local/cuda/lib64
 LDLIBS=-lstdc++ -lcudart -lm

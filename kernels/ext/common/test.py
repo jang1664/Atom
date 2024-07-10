@@ -1,5 +1,7 @@
 import torch
-import gemv_acim_v1
+import gemm_acim_v1
+import gemm_acim_v2
+import gemm_acim_v3
 
 if __name__ == "__main__":
 

@@ -21,7 +21,7 @@ void allocate_array(char **A, char **B, float **C, float **C_ref, float **in_sca
   *wt_scale = new float[CEIL_DIV(KNMAX, 128)];
 }
 
-void random_A(char *A, int M, int K) {
+void random_A(char *A, int M, int K, bool random) {
 
   std::uniform_int_distribution<int> norm_distribution(-8, 7);
   std::uniform_int_distribution<int> out_distribution(-128, 127);
@@ -29,16 +29,25 @@ void random_A(char *A, int M, int K) {
 
   for (int m = 0; m < M; m++) {
     for (int k = 0; k < K; k++) {
-      if (k + 128 > K) {
-        A[m * K + k] = out_distribution(generator);
+      if (k + 128 >= K) {
+        if (random) {
+          A[m * K + k] = out_distribution(generator);
+          // A[m * K + k] = norm_distribution(generator);
+        } else {
+          A[m * K + k] = 1;
+        }
       } else {
-        A[m * K + k] = norm_distribution(generator);
+        if (random) {
+          A[m * K + k] = norm_distribution(generator);
+        } else {
+          A[m * K + k] = 1;
+        }
       }
     }
   }
 }
 
-void random_B(char *B, int K, int N) {
+void random_B(char *B, int K, int N, bool random) {
 
   std::uniform_int_distribution<int> norm_distribution(-8, 7);
   std::uniform_int_distribution<int> out_distribution(-128, 127);
@@ -46,47 +55,68 @@ void random_B(char *B, int K, int N) {
 
   for (int k = 0; k < K; k++) {
     for (int n = 0; n < N; n++) {
-      if (k + 128 > K) {
-        B[n * K + k] = out_distribution(generator);
+      if (k + 128 >= K) {
+        if (random) {
+          B[n * K + k] = out_distribution(generator);
+          // B[n * K + k] = norm_distribution(generator);
+        } else {
+          B[n * K + k] = 1;
+        }
       } else {
-        B[n * K + k] = norm_distribution(generator);
+        if (random) {
+          B[n * K + k] = norm_distribution(generator);
+        } else {
+          B[n * K + k] = 1;
+        }
       }
     }
   }
 }
 
-void random_C(float *C, int M, int N) {
+void random_C(float *C, int M, int N, bool random) {
 
   std::normal_distribution<float> distribution(1.0, 0.1);
   std::default_random_engine generator;
 
   for (int m = 0; m < M; m++) {
     for (int n = 0; n < N; n++) {
-      C[m * N + n] = distribution(generator);
+      if (random) {
+        C[m * N + n] = distribution(generator);
+      } else {
+        C[m * N + n] = 1;
+      }
     }
   }
 }
 
-void random_in_scale(float *C, int M, int K) {
+void random_in_scale(float *C, int M, int K, bool random) {
 
   std::normal_distribution<float> distribution(1.0, 0.1);
   std::default_random_engine generator;
 
   for (int m = 0; m < M; m++) {
     for (int k = 0; k < (K / 128); k++) {
-      C[m * (K / 128) + k] = distribution(generator);
+      if (random) {
+        C[m * (K / 128) + k] = distribution(generator);
+      } else {
+        C[m * (K / 128) + k] = 1;
+      }
     }
   }
 }
 
-void random_weight_scale(float *C, int K, int N) {
+void random_weight_scale(float *C, int K, int N, bool random) {
 
   std::normal_distribution<float> distribution(1.0, 0.1);
   std::default_random_engine generator;
 
   for (int k = 0; k < (K / 128); k++) {
     for (int n = 0; n < N; n++) {
-      C[n * (K / 128) + k] = distribution(generator);
+      if (random) {
+        C[n * (K / 128) + k] = distribution(generator);
+      } else {
+        C[n * (K / 128) + k] = 1;
+      }
     }
   }
 }

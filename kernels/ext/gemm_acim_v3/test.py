@@ -1,5 +1,5 @@
 import torch
-import gemv_acim_v1
+import gemm_acim_v3
 
 if __name__ == "__main__":
 
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     dequant_weight_data = weight_data.float() * torch.repeat_interleave(weight_scale_data, 128, dim=-1)
 
     ref_output_data = torch.matmul(dequant_input_data.float(), dequant_weight_data.float().T)
-    eval_output_data = gemv_acim_v1.forward(input_data.to(torch.uint8).to(DEV), weight_data.to(torch.uint8).to(DEV), in_scale_data.to(DEV), weight_scale_data.to(DEV), 4, 4, False).reshape(ref_output_data.shape)
+    eval_output_data = gemm_acim_v3.forward(input_data.to(torch.uint8).to(DEV), weight_data.to(torch.uint8).to(DEV), in_scale_data.to(DEV), weight_scale_data.to(DEV), 4, 4, 8, 8, False).reshape(ref_output_data.shape)
 
     # print("\npython in_scale data")
     # print(in_scale_data)

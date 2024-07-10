@@ -48,3 +48,7 @@ void gemm_acim_v3(const char *A, const char *B, float *C, const int M, const int
       exit(EXIT_FAILURE);                                                                          \
     }                                                                                              \
   } while (0)
+
+#ifdef DEBUG
+#define DEBUG_COND (tidx == 0 && bidy == 0 && bidz == 0 && tidy == 0 && tidz == 0)
+#endif

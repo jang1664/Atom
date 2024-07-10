@@ -1,0 +1,131 @@
+========= COMPUTE-SANITIZER
+========= Program hit cudaErrorLaunchOutOfResources (error 701) due to "too many resources requested for launch" on CUDA API call to cudaLaunchKernel.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaLaunchKernel [0x6d5bb]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:92:void cuda_gemm_acim_v3<4, 4, 4, 4, 128>(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x35c9]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:438:gemm_acim_v3(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x2ce1]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_util.cpp:146:warm_up(void (*)(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool), char*, char*, float*, int, int, int, float*, float*, int, int, int, int, bool, int) [0x5360]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_gemm_acim_v3.cpp:70:main [0x25b7]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../sysdeps/nptl/libc_start_call_main.h:58:__libc_start_call_main [0x29d90]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:../csu/libc-start.c:379:__libc_start_main [0x29e40]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x2825]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+========= 
+========= Program hit cudaErrorLaunchOutOfResources (error 701) due to "too many resources requested for launch" on CUDA API call to cudaLaunchKernel.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaLaunchKernel [0x6d5bb]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:92:void cuda_gemm_acim_v3<4, 4, 4, 4, 128>(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x35c9]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:438:gemm_acim_v3(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x2ce1]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_util.cpp:146:warm_up(void (*)(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool), char*, char*, float*, int, int, int, float*, float*, int, int, int, int, bool, int) [0x5360]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_gemm_acim_v3.cpp:70:main [0x25b7]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../sysdeps/nptl/libc_start_call_main.h:58:__libc_start_call_main [0x29d90]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:../csu/libc-start.c:379:__libc_start_main [0x29e40]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x2825]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+========= 
+========= Program hit cudaErrorLaunchOutOfResources (error 701) due to "too many resources requested for launch" on CUDA API call to cudaLaunchKernel.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaLaunchKernel [0x6d5bb]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:92:void cuda_gemm_acim_v3<4, 4, 4, 4, 128>(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x35c9]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:438:gemm_acim_v3(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x2ce1]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_util.cpp:146:warm_up(void (*)(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool), char*, char*, float*, int, int, int, float*, float*, int, int, int, int, bool, int) [0x5360]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_gemm_acim_v3.cpp:70:main [0x25b7]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../sysdeps/nptl/libc_start_call_main.h:58:__libc_start_call_main [0x29d90]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:../csu/libc-start.c:379:__libc_start_main [0x29e40]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x2825]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+========= 
+========= Program hit cudaErrorLaunchOutOfResources (error 701) due to "too many resources requested for launch" on CUDA API call to cudaLaunchKernel.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaLaunchKernel [0x6d5bb]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:92:void cuda_gemm_acim_v3<4, 4, 4, 4, 128>(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x35c9]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:438:gemm_acim_v3(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x2ce1]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_util.cpp:162:run_test(void (*)(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool), char*, char*, float*, int, int, int, float*, float*, int, int, int, int, bool, int, bool, float*, _IO_FILE*) [0x5523]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_gemm_acim_v3.cpp:74:main [0x25f4]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../sysdeps/nptl/libc_start_call_main.h:58:__libc_start_call_main [0x29d90]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:../csu/libc-start.c:379:__libc_start_main [0x29e40]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x2825]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+========= 
+========= Program hit cudaErrorLaunchOutOfResources (error 701) due to "too many resources requested for launch" on CUDA API call to cudaLaunchKernel.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaLaunchKernel [0x6d5bb]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:92:void cuda_gemm_acim_v3<4, 4, 4, 4, 128>(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x35c9]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:438:gemm_acim_v3(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x2ce1]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_util.cpp:162:run_test(void (*)(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool), char*, char*, float*, int, int, int, float*, float*, int, int, int, int, bool, int, bool, float*, _IO_FILE*) [0x5523]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_gemm_acim_v3.cpp:74:main [0x25f4]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../sysdeps/nptl/libc_start_call_main.h:58:__libc_start_call_main [0x29d90]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:../csu/libc-start.c:379:__libc_start_main [0x29e40]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x2825]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+========= 
+========= Program hit cudaErrorLaunchOutOfResources (error 701) due to "too many resources requested for launch" on CUDA API call to cudaLaunchKernel.
+=========     Saved host backtrace up to driver entry point at error
+=========     Host Frame: [0x480076]
+=========                in /lib/x86_64-linux-gnu/libcuda.so.1
+=========     Host Frame:cudaLaunchKernel [0x6d5bb]
+=========                in /usr/local/cuda-12.2/lib64/libcudart.so.12
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:92:void cuda_gemm_acim_v3<4, 4, 4, 4, 128>(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x35c9]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/GEMM/gemm_acim_v3.cu:438:gemm_acim_v3(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool) [0x2ce1]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_util.cpp:162:run_test(void (*)(char const*, char const*, float*, int, int, int, float const*, float const*, int, int, int, int, bool), char*, char*, float*, int, int, int, float*, float*, int, int, int, int, bool, int, bool, float*, _IO_FILE*) [0x5523]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../src/test_gemm_acim_v3.cpp:74:main [0x25f4]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+=========     Host Frame:../sysdeps/nptl/libc_start_call_main.h:58:__libc_start_call_main [0x29d90]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:../csu/libc-start.c:379:__libc_start_main [0x29e40]
+=========                in /lib/x86_64-linux-gnu/libc.so.6
+=========     Host Frame:_start [0x2825]
+=========                in /root/project/Atom/kernels/test/./test_gemm_acim_v3
+========= 
+RUN TEST
+M: 1, K: 4096, N: 4096
+Results do not match. 4096/4096
+========= ERROR SUMMARY: 6 errors

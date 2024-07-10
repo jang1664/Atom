@@ -7,7 +7,7 @@
   CHECK_CUDA(x);                                                                                   \
   CHECK_CONTIGUOUS(x)
 
-void gemv_acim_with_scale_v1(const char *A, const char *B, float *C, const int M, const int N,
+void gemm_acim_with_scale_v2(const char *A, const char *B, float *C, const int M, const int N,
                              const int K, const float *in_scale, const float *weight_scale,
                              const int input_bw, const int weight_bw, const bool quant);
 
@@ -26,7 +26,7 @@ torch::Tensor gemm_acim_forward(torch::Tensor input, torch::Tensor weight, torch
 
   torch::Tensor output = torch::zeros(M * N);
   // printf("M: %d, N: %d, K: %d\n", M, N, K);
-  gemv_acim_with_scale_v1((char *)input.data_ptr<unsigned char>(),
+  gemm_acim_with_scale_v2((char *)input.data_ptr<unsigned char>(),
                           (char *)weight.data_ptr<unsigned char>(), output.data_ptr<float>(), M, N,
                           K, in_scale.data_ptr<float>(), weight_scale.data_ptr<float>(), input_bw,
                           weight_bw, quant);
