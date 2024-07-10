@@ -1,6 +1,0 @@
-warning at src/GEMV/gemv_acim_with_scale_v1.cu:378
-Mismatch at 2097 0.65033 0.649228
-Mismatch at 3129 0.557495 0.558252
-Results do not match. 2/4096
-GFLOPS: 7.211030e-01
-latency : 1.250550e-01 seconds
