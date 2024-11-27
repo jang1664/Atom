@@ -1,5 +1,6 @@
 import sys
-sys.path.append("./model")
+import os
+sys.path.append(f"{os.environ['PROJ_DIR']}/model")
 
 import torch
 import argparse
@@ -25,31 +26,12 @@ from lm_eval import tasks as lm_tasks
 from lm_eval import evaluator as lm_evaluator
 from datautils import *
 import qLinearLayer
+import pickle
+import logging
+from tqdm import tqdm
 
 torch.set_printoptions(precision=10)
 DEV = torch.device('cuda')
-model = torch.load("./saved/llama2-7b_quantized.pth", map_location=torch.device('cpu'))
-# model = model.to(DEV)
-
-changed_layers = {}
-for name, m in model.model.named_modules():
-    if isinstance(m, qLinearLayer.QLinearLayer):
-      layer_v2 = qLinearLayer.QLinearLayerV2()
-      # layer_v2 = qLinearLayer.QLinearLayerACIM()
-      layer_v2.construct(m.to(torch.device('cpu')))
-      layer_v2.name = name
-      # layer_v2.args = m.args
-      # layer_v2.weight = m.weight
-      # layer_v2.bias = m.bias
-      del m
-      changed_layers[name] = layer_v2
-
-for name, layer in changed_layers.items():
-    # if "layers.8" in name:
-    analyze.set_nested_attr(model.model, name, layer)
-      # break
-
-print(model)
 
 parser = argparse.ArgumentParser()
 
@@ -184,22 +166,39 @@ parser.add_argument(
     help='Determine the mapped data format by quant_type + n_bits. e.g. int8, fp4.'
 )
 parser.add_argument(
-    '--save_model', action="store_true", default=True,
-    help='Whether to save the quantized model.'
+    '--save_model', action="store_true", help='Whether to save the quantized model.'
 )
+parser.add_argument(
+    '--save_model_name', type=str, default='llama7b_quant_quantized.pth',
+    help='Path to save the quantized model.'
+)
+parser.add_argument('--hook_data', action="store_true")
+parser.add_argument('--test_name', type=str, default='llama2-7b_quant')
 
-args = parser.parse_args(
-  args = [
-    "/root/project/Atom/llama2-7b",
-    "wikitext2",
-    "--wbits", "4", "--abits", "4", "--a_sym", "--w_sym", "--save_model",
-    "--act_group_size", "128", "--weight_group_size", "128", "--weight_channel_group", "2",
-    "--reorder", "--act_sort_metric", "hessian", "--cache_index",
-    "--a_clip_ratio", "0.9", "--w_clip_ratio", "0.85", "--kv_clip_ratio", "1.0",
-    "--keeper", "128", "--keeper_precision", "3", "--kv_cache", "--use_gptq",
-    "--eval_common_sense", "--lm_eval_limit", "-1"
-  ]
-)
+args = parser.parse_args()
+
+RESULT_DIR = os.path.join(os.path.dirname(__file__), "results", args.test_name)
+os.makedirs(RESULT_DIR, exist_ok=True)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# stream
+ch = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+# file
+fh = logging.FileHandler(f"{RESULT_DIR}/log.txt", mode="w")
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
+logger.info("Running Zero-shot Evaluation")
+logger.info(args)
+
+model = torch.load(f"{args.save_dir}/{args.save_model_name}", map_location=torch.device('cpu'))
 
 lm = LMClass(args, model)
 lm.seqlen = 2048
@@ -231,27 +230,94 @@ else:
     lm._device = DEV
     lm.model = lm.model.to(lm.device)
 
-results = {}
-# tasks_str = "piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande"
-# tasks_str = "hellaswag,winogrande"
-# tasks_str = "hellaswag"
-tasks_str = "winogrande"
-task_names = pattern_match(tasks_str.split(","), lm_tasks.ALL_TASKS)
-print(f"Selected Tasks: {task_names}")
+# tasks = ["piqa","arc_easy","arc_challenge","boolq","hellaswag","winogrande"]
+tasks = ["arc_challenge","boolq","hellaswag","winogrande"]
+logger.info(f"Tasks: {tasks}")
+hooked_data = {}
+all_results = {}
 
-task_dict = lm_tasks.get_task_dict(task_names)
-t_results = lm_evaluator.evaluate(
-    lm,
-    task_dict,
-    num_fewshot=args.lm_eval_num_fewshot,
-    limit=None if args.lm_eval_limit == -1 else args.lm_eval_limit
-)
-results.update(t_results)
-pprint(results)
+def extract_exponent(tensor):
+    tensor = tensor.to(torch.float16)
+    bits = tensor.view(torch.int16)
+    exponent_mask = 0x7f80
+    exponent_bits = (bits & exponent_mask) >> 7
+    exponent = exponent_bits - 127
+    return exponent
 
-results_dict = results['results']
-for task_name in tasks_str.split(','):
-    if task_name in ['piqa', 'arc_easy', 'arc_challenge', 'hellaswag']:
-        print(f"INFO {task_name} : {results_dict[task_name]['acc_norm']*100:.2f}")
-    else:
-        print(f"INFO {task_name} : {results_dict[task_name]['acc']*100:.2f}")
+def getDist(tensor):
+  TargetInput = tensor
+  IExps = extract_exponent(TargetInput)
+  DistVal, DistCount = torch.unique(IExps, return_counts=True)
+  InputDist = {}
+  for val, count in zip(DistVal, DistCount):
+    InputDist[val.item()] = count.item()
+  return InputDist
+
+def getDistBlocks(tensor, block_size):
+  OriginShape = tensor.shape
+  TargetInput = tensor.reshape(-1, block_size)
+  IExps = extract_exponent(TargetInput)
+  Dists = []
+  # tqdm.write(f"TargetInput Shape: {TargetInput.shape}")
+  # for i in tqdm(range(IExps.shape[0])):
+  for i in range(IExps.shape[0]):
+    DistVal, DistCount = torch.unique(IExps[i, :], return_counts=True)
+    Dists.append((DistVal.cpu().numpy(), DistCount.cpu().numpy()))
+
+  return Dists
+
+try:
+  for task in tasks:
+    logger.info(f"Running Task: {task}")
+
+    if args.hook_data:
+      hooked_data[task] = {}
+      hooks = []
+      def stat_input_hook(name, module, input, output):
+        if name not in hooked_data[task]:
+          hooked_data[task][name] = []
+        InputDist = getDistBlocks(input[0], 128)
+        # WeightDist = getDistBlocks(module.weight, 128)
+        hooked_data[task][name].append(InputDist)
+
+      for name, m in model.model.named_modules():
+          if isinstance(m, qLinearLayer.QLinearLayer):
+              hooks.append(
+                  m.register_forward_hook(functools.partial(stat_input_hook, name)) #- hook the function with name fixed
+              )
+
+    results = {}
+    # tasks_str = "piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande"
+    # tasks_str = "hellaswag,winogrande"
+    # tasks_str = "hellaswag"
+    tasks_str = task
+    task_names = pattern_match(tasks_str.split(","), lm_tasks.ALL_TASKS)
+
+    task_dict = lm_tasks.get_task_dict(task_names)
+    t_results = lm_evaluator.evaluate(
+        lm,
+        task_dict,
+        num_fewshot=args.lm_eval_num_fewshot,
+        limit=None if args.lm_eval_limit == -1 else args.lm_eval_limit
+    )
+    results.update(t_results)
+    logger.info(f"Results: {results}")
+
+    results_dict = results['results']
+    all_results.update(results_dict)
+    for task_name in tasks_str.split(','):
+        if task_name in ['piqa', 'arc_easy', 'arc_challenge', 'hellaswag']:
+            logger.info(f"INFO {task_name} : {results_dict[task_name]['acc_norm']*100:.2f}")
+        else:
+            logger.info(f"INFO {task_name} : {results_dict[task_name]['acc']*100:.2f}")
+
+    if args.hook_data:
+      for hook in hooks:
+          hook.remove()
+except KeyboardInterrupt as e:
+    logger.info("Keyboard Interrupted")
+    logger.info(e)
+
+if args.hook_data:
+  pickle.dump(hooked_data, open(f"{RESULT_DIR}/hooked_data.pkl", "wb"))
+pickle.dump(all_results, open(f"{RESULT_DIR}/all_results.pkl", "wb"))

@@ -3,7 +3,7 @@ import torch.nn as nn
 from quant import fake_quantize_quarter_E5M2, fake_quantize_quarter_E4M3, quantize_tensor, quantize_tensor_channel_group
 # import gemm_acim_v1
 # import gemv_acim_v2
-import gemm_acim_v3
+# import gemm_acim_v3
 
 def find_qlinear_layers(module, name=''):
     if type(module) == QLinearLayer:

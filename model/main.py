@@ -192,8 +192,8 @@ if __name__ == '__main__':
         help='Whether to save the quantized model.'
     )
     parser.add_argument(
-        '--exit_on_save', action="store_true", default=False,
-        help='Whether to exit after saving the quantized model.'
+        '--save_model_name', type=str, default="saved_model",
+        help='Whether to save the quantized model.'
     )
     
     args = parser.parse_args()
@@ -276,9 +276,7 @@ if __name__ == '__main__':
 
     if args.save_model:
         print("Saving model...")
-        torch.save(model.cpu(), f'{args.save_dir}/{model_name}_quantized.pth')
-        if(args.exit_on_save):
-            exit(0)
+        torch.save(model.cpu(), f'{args.save_dir}/{args.save_model_name}_quantized.pth')
 
     if args.eval_ppl:
         # datasets = ['wikitext2', 'ptb', 'c4']

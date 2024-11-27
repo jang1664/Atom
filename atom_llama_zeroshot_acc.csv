@@ -1,6 +1,0 @@
-model,bit,piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
-llama2-7b,4,,,,,,
-model,bit,piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
-,4,,,,,,
-model,bit,piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
-llama2-7b,4,,,,,,

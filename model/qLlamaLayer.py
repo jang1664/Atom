@@ -149,6 +149,8 @@ class QLlamaRMSNorm(nn.Module):
 
         if self.args.abits < 16:
             result, result_int, result_scale = self.act_quant(result)
+        else:
+            result_int, result_scale = None, None
 
         return result, result_int, result_scale
     
@@ -179,6 +181,7 @@ class QLlamaAttention(nn.Module):
         self.num_key_value_groups = originalAttn.num_key_value_groups
         self.max_position_embeddings = originalAttn.max_position_embeddings
         self.rope_theta = originalAttn.rope_theta
+        self.args = args
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -306,7 +309,10 @@ class QLlamaAttention(nn.Module):
             attn_output = torch.index_select(attn_output, 2, self.reorder_index)
 
         # Quantize the attention output
-        attn_output, attn_output_int, attn_output_scale = self.act_quant(attn_output)
+        if self.args.abits < 16:
+          attn_output, attn_output_int, attn_output_scale = self.act_quant(attn_output)
+        else:
+          attn_output_int, attn_output_scale = None, None
         attn_output = self.o_proj(attn_output, attn_output_int, attn_output_scale)
 
         if not output_attentions:
@@ -336,6 +342,7 @@ class QLlamaMLP(nn.Module):
         )
         self.act_fn = originalMLP.act_fn
         self.act_quant = Quantizer(args=args)
+        self.args = args
         # self.register_buffer("act_shifts", None)
 
     def to(self, *args, **kwargs):
@@ -351,5 +358,8 @@ class QLlamaMLP(nn.Module):
         # input X: [b, seq, dim]: quantized
         tmpResult = self.act_fn(self.gate_proj(x, x_int, x_scale)) * self.up_proj(x, x_int, x_scale)
         # Quantize the activations and feed into down_proj
-        tmpResult, tmpResult_int, tmpResult_scale = self.act_quant(tmpResult)
+        if self.args.abits < 16:
+          tmpResult, tmpResult_int, tmpResult_scale = self.act_quant(tmpResult)
+        else:
+          tmpResult_int, tmpResult_scale = None, None
         return self.down_proj(tmpResult, tmpResult_int, tmpResult_scale)

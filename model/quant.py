@@ -267,13 +267,16 @@ def quantize_attn_k_wrapper(w: torch.tensor, args) -> torch.tensor:
     w, _, _ = quantize_tensor(w, n_bits=args.abits, group_size=0, tiling=0, sym=False, clip_ratio=args.kv_clip_ratio, exponential=False)
     return w.view(saved_shape)
 
+def feedThrough(x):
+    return x
+
 class Quantizer(nn.Module):
     def __init__(self, args) -> None:
         super().__init__()
         self.register_buffer("scales", None)
         self.args = args
         # act_quant are configured outside.
-        self.act_quant = lambda x: x
+        self.act_quant = feedThrough
 
     @torch.no_grad()
     def forward(self, hidden_states):
